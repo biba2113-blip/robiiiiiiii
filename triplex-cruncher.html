@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="fr-CA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini Cruncher Triplex</title>
+<style>
+:root{
+  --bg:#f6f7f9; --card:#fff; --ink:#111827; --muted:#6b7280; --line:#e5e7eb;
+  --accent:#111827; --accent-ink:#fff; --pos:#0f7b4f; --neg:#b42318; --warn:#b45309;
+  --pos-bg:#e6f4ee; --neg-bg:#fdecea; --hl:#eef2ff;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1116; --card:#171b22; --ink:#e8eaed; --muted:#9aa3af; --line:#2a303a;
+    --accent:#e8eaed; --accent-ink:#0e1116; --pos:#4ade80; --neg:#f87171; --warn:#fbbf24;
+    --pos-bg:#12291d; --neg-bg:#2d1615; --hl:#1c2233;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:16px}
+main{max-width:1000px;margin:0 auto;display:grid;gap:16px}
+h1{font-size:22px;margin:4px 0 0}
+h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+.sub{color:var(--muted);font-size:13px;margin:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+.grid{display:grid;gap:12px;grid-template-columns:1fr 1fr}
+.grid3{grid-template-columns:repeat(3,1fr)}
+@media (max-width:560px){.grid3{grid-template-columns:1fr 1fr}}
+label{display:block;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px}
+label .v{float:right;color:var(--muted);font-weight:600}
+.f{position:relative}
+.f input[type=number]{width:100%;padding:10px 10px 10px 26px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:inherit}
+.f.pct input[type=number]{padding-left:10px}
+.f .u{position:absolute;left:10px;bottom:10px;color:var(--muted)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.seg{display:flex;gap:8px;flex-wrap:wrap}
+.seg button{flex:1;min-width:110px;padding:9px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:inherit;font-weight:600;cursor:pointer}
+.seg button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.seg button:disabled{opacity:.4;cursor:not-allowed}
+.note{font-size:12px;color:var(--muted);font-style:italic;margin:6px 0 0}
+.warn{color:var(--warn)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.kpi{border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.kpi b{display:block;font-size:20px;font-variant-numeric:tabular-nums}
+.kpi span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.pos{color:var(--pos)} .neg{color:var(--neg)}
+.scroll{overflow-x:auto;margin:0 -4px}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-size:13px}
+th,td{padding:7px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:var(--card)}
+thead th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);vertical-align:bottom;white-space:normal;min-width:92px}
+thead th:first-child{min-width:150px}
+td.best,th.best{background:var(--hl)}
+tr.sep td{font-weight:700;border-top:2px solid var(--line)}
+.bar{display:block;height:6px;border-radius:3px;margin-top:3px}
+.reco{background:var(--hl);border-color:transparent}
+.reco p{margin:6px 0}
+.reco ol{margin:6px 0 0;padding-left:20px}
+.tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:99px;background:var(--pos-bg);color:var(--pos);font-weight:700;margin-left:4px}
+select{padding:9px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:inherit;max-width:100%}
+.units{display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:8px;align-items:end}
+.units .h{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.units .n{padding-bottom:10px;font-weight:700}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Mini Cruncher — Triplex</h1>
+    <p class="sub">Service de la dette · prise de valeur · hausse des dépenses · scénarios d'occupation et d'optimisation</p>
+  </header>
+
+  <section class="card">
+    <h2>Acquisition</h2>
+    <div class="grid">
+      <div class="f"><label>Prix demandé</label><span class="u">$</span><input type="number" id="ask" value="340000" step="1000"></div>
+      <div class="f"><label>Votre offre cible</label><span class="u">$</span><input type="number" id="offer" value="350000" step="1000"></div>
+    </div>
+    <p class="note">L'analyse se base sur votre <b>offre cible</b>.</p>
+
+    <h2 style="margin-top:18px">Logements</h2>
+    <div class="units">
+      <span class="h">Unité</span><span class="h">Loyer actuel /mois</span><span class="h">Loyer optimisé /mois</span>
+      <span class="n">5½</span>
+      <div class="f"><span class="u">$</span><input type="number" id="cur0" value="1200"></div>
+      <div class="f"><span class="u">$</span><input type="number" id="opt0" value="1002"></div>
+      <span class="n">4½ (A)</span>
+      <div class="f"><span class="u">$</span><input type="number" id="cur1" value="710"></div>
+      <div class="f"><span class="u">$</span><input type="number" id="opt1" value="1100"></div>
+      <span class="n">4½ (B)</span>
+      <div class="f"><span class="u">$</span><input type="number" id="cur2" value="780"></div>
+      <div class="f"><span class="u">$</span><input type="number" id="opt2" value="1100"></div>
+    </div>
+    <p class="note" id="rentNote"></p>
+
+    <div class="grid" style="margin-top:12px">
+      <div><label>Taux de vacance <span class="v" id="vacV"></span></label><input type="range" id="vac" min="0" max="10" step="0.5" value="3"></div>
+      <div class="f"><label>Loyer que vous payez actuellement (optionnel)</label><span class="u">$</span><input type="number" id="myRent" value="0"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Dépenses d'exploitation / an</h2>
+    <div class="grid">
+      <div class="f"><label>Taxes municipales</label><span class="u">$</span><input type="number" class="exp" id="e_tax" value="4674"></div>
+      <div class="f"><label>Taxe scolaire</label><span class="u">$</span><input type="number" class="exp" id="e_sch" value="200"></div>
+      <div class="f"><label>Assurance</label><span class="u">$</span><input type="number" class="exp" id="e_ins" value="3607"></div>
+      <div class="f"><label>Énergie (aires communes)</label><span class="u">$</span><input type="number" class="exp" id="e_nrg" value="0"></div>
+      <div class="f"><label>Déneigement</label><span class="u">$</span><input type="number" class="exp" id="e_snow" value="800"></div>
+      <div class="f"><label>Entretien / réparations</label><span class="u">$</span><input type="number" class="exp" id="e_mnt" value="2100"></div>
+      <div class="f"><label>Gestion</label><span class="u">$</span><input type="number" class="exp" id="e_mgt" value="0"></div>
+      <div class="f"><label>Conciergerie</label><span class="u">$</span><input type="number" class="exp" id="e_con" value="0"></div>
+    </div>
+    <p style="display:flex;justify-content:space-between;margin:14px 0 0;padding-top:10px;border-top:1px solid var(--line)"><span>Total des dépenses</span><b id="expTotal"></b></p>
+  </section>
+
+  <section class="card">
+    <h2>Financement</h2>
+    <div class="seg" id="prog">
+      <button data-p="conv" class="on">Conventionnel</button>
+      <button data-p="schl">SCHL assuré</button>
+      <button data-p="aph" disabled title="APH Select exige 5 logements et plus">APH Select 50 ans</button>
+    </div>
+    <p class="note" id="progNote"></p>
+    <div class="grid" style="margin-top:12px">
+      <div><label>Mise de fonds <span class="v" id="downV"></span></label><input type="range" id="down" min="5" max="50" step="1" value="20"></div>
+      <div class="f pct"><label>Taux hypothécaire (%)</label><input type="number" id="rate" value="4.5" step="0.05"></div>
+      <div class="f pct"><label>Amortissement (ans)</label><input type="number" id="amort" value="30" min="5" max="40"></div>
+      <div class="f"><label>Frais d'acquisition (notaire, inspection, droits de mutation)</label><span class="u">$</span><input type="number" id="closing" value="8000" step="500"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Hypothèses de croissance</h2>
+    <div class="grid3 grid">
+      <div class="f pct"><label>Hausse des loyers /an (%)</label><input type="number" id="gRent" value="2" step="0.25"></div>
+      <div class="f pct"><label>Hausse des dépenses /an (%)</label><input type="number" id="gExp" value="3" step="0.25"></div>
+      <div class="f pct"><label>Prise de valeur /an (%)</label><input type="number" id="gVal" value="3" step="0.25"></div>
+    </div>
+  </section>
+
+  <section class="card" id="debt"></section>
+  <section class="card" id="scen"></section>
+  <section class="card reco" id="reco"></section>
+  <section class="card" id="proj"></section>
+
+  <p class="note" style="text-align:center">Outil d'aide à la décision seulement — valider les hypothèses (taux, primes SCHL, règles de hausse de loyer du TAL, fiscalité) avec votre courtier hypothécaire et un comptable.</p>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const num = id => parseFloat($(id).value) || 0;
+const cad = (n, d = 0) => (n < 0 ? '−' : '') + Math.abs(n).toLocaleString('fr-CA', {minimumFractionDigits: d, maximumFractionDigits: d}) + ' $';
+const pct = (n, d = 1) => (n * 100).toLocaleString('fr-CA', {minimumFractionDigits: d, maximumFractionDigits: d}) + ' %';
+const cls = n => n >= 0 ? 'pos' : 'neg';
+
+let program = 'conv';
+const PROGRAMS = {
+  conv: {label: 'Conventionnel', minDown: 0.15, amort: 30, note: 'Conventionnel : mise de fonds min. 15 %, amortissement max. 30 ans, sans prime.'},
+  schl: {label: 'SCHL assuré', minDown: 0.10, amort: 25, note: 'SCHL assuré (2 à 4 logements, propriétaire-occupant) : mise de fonds min. 10 %, prime capitalisée au prêt (3,10 % si LTV 85–90 %, 2,80 % si 80–85 %), amortissement 25 ans (30 ans possible pour premiers acheteurs — à confirmer).'}
+};
+
+// --- hypothèque canadienne (capitalisation semestrielle)
+const mRate = r => Math.pow(1 + r / 2, 1 / 6) - 1;
+function pmt(loan, r, years) {
+  const i = mRate(r), n = years * 12;
+  if (loan <= 0) return 0;
+  return i === 0 ? loan / n : loan * i / (1 - Math.pow(1 + i, -n));
+}
+function balance(loan, r, years, months) {
+  const i = mRate(r), p = pmt(loan, r, years);
+  if (i === 0) return Math.max(0, loan - p * months);
+  return Math.max(0, loan * Math.pow(1 + i, months) - p * (Math.pow(1 + i, months) - 1) / i);
+}
+
+function schlPremium(ltv) {
+  if (ltv > 0.90) return 0.04;
+  if (ltv > 0.85) return 0.031;
+  if (ltv > 0.80) return 0.028;
+  return 0;
+}
+
+function getInputs() {
+  const offer = num('offer');
+  const down = num('down') / 100;
+  const base = offer * (1 - down);
+  const premium = program === 'schl' ? base * schlPremium(1 - down) : 0;
+  const loan = base + premium;
+  const rate = num('rate') / 100, amort = num('amort') || 25;
+  return {
+    offer, ask: num('ask'), down, base, premium, loan, rate, amort,
+    payM: pmt(loan, rate, amort),
+    cash: offer * down + num('closing'),
+    vac: num('vac') / 100,
+    exp: [...document.querySelectorAll('.exp')].reduce((s, e) => s + (parseFloat(e.value) || 0), 0),
+    units: [0, 1, 2].map(i => ({name: ['5½', '4½ (A)', '4½ (B)'][i], cur: num('cur' + i), opt: num('opt' + i)})),
+    gRent: num('gRent') / 100, gExp: num('gExp') / 100, gVal: num('gVal') / 100,
+    myRent: num('myRent')
+  };
+}
+
+const SCENARIOS = [
+  {name: 'Tout loué\nactuel', occ: null, opt: false},
+  {name: 'Tout loué\noptimisé', occ: null, opt: true},
+  {name: "J'occupe\n5½", occ: 0, opt: false},
+  {name: "J'occupe\n4½ (A) 710 $", occ: 1, opt: false},
+  {name: "J'occupe\n4½ (B) 780 $", occ: 2, opt: false},
+  {name: "J'occupe 5½\n+ optimisé", occ: 0, opt: true},
+  {name: "J'occupe 4½ (A)\n+ optimisé", occ: 1, opt: true},
+  {name: "J'occupe 4½ (B)\n+ optimisé", occ: 2, opt: true}
+];
+
+function compute(s, I, yearsOut = 1) {
+  const rentOf = (u, idx) => (s.opt ? u.opt : u.cur);
+  const grossM = I.units.reduce((t, u, i) => t + (i === s.occ ? 0 : rentOf(u)), 0);
+  const gross = grossM * 12;
+  const vacLoss = gross * I.vac;
+  const egi = gross - vacLoss;
+  const noi = egi - I.exp;
+  const ds = I.payM * 12;
+  const cf = noi - ds;
+  const bal1 = balance(I.loan, I.rate, I.amort, 12);
+  const principal1 = I.loan - bal1;
+  const interest1 = ds - principal1;
+  const occRent = s.occ === null ? 0 : (s.opt ? I.units[s.occ].opt : I.units[s.occ].cur);
+  return {
+    gross, vacLoss, egi, noi, ds, cf, principal1, interest1,
+    cfM: cf / 12, dscr: ds ? noi / ds : 0,
+    cap: I.offer ? noi / I.offer : 0,
+    coc: I.cash ? cf / I.cash : 0,
+    occRent,
+    housingM: -cf / 12,                 // coût mensuel net pour se loger (négatif = ça vous rapporte)
+    housingAfterPrincipalM: -(cf + principal1) / 12,
+    rentedCount: s.occ === null ? 3 : 2,
+    grossM
+  };
+}
+
+function render() {
+  const I = getInputs();
+  const P = PROGRAMS[program];
+  $('vacV').textContent = pct(I.vac, 1);
+  $('downV').textContent = pct(I.down, 0);
+  $('expTotal').textContent = cad(I.exp);
+
+  const curGrossY = I.units.reduce((t, u) => t + u.cur, 0) * 12;
+  const noFive = (I.units[1].cur + I.units[2].cur) * 12;
+  $('rentNote').innerHTML = `Loyers actuels : <b>${cad(curGrossY)}</b>/an (${cad(curGrossY / 12)}/mois). Sans le 5½ : ${cad(noFive)}/an — proche des 17 940 $ de votre grille (scénario « j'occupe le 5½ »).`;
+  $('progNote').textContent = P.note;
+  const minWarn = I.down < P.minDown - 1e-9;
+  if (minWarn) $('progNote').innerHTML += ` <span class="warn">⚠ Mise de fonds sous le minimum (${pct(P.minDown, 0)}).</span>`;
+
+  // ---------- Service de la dette
+  const ltv = 1 - I.down;
+  const sens = [-1, -0.5, 0, 0.5, 1].map(d => {
+    const r = Math.max(0, I.rate + d / 100);
+    return {r, m: pmt(I.loan, r, I.amort)};
+  });
+  $('debt').innerHTML = `
+    <h2>Service de la dette</h2>
+    <div class="kpis">
+      <div class="kpi"><span>Prêt (incl. prime)</span><b>${cad(I.loan)}</b></div>
+      <div class="kpi"><span>Mise de fonds</span><b>${cad(I.offer * I.down)}</b></div>
+      <div class="kpi"><span>Mise de fonds + frais</span><b>${cad(I.cash)}</b></div>
+      <div class="kpi"><span>Paiement mensuel</span><b>${cad(I.payM)}</b></div>
+      <div class="kpi"><span>Service annuel</span><b>${cad(I.payM * 12)}</b></div>
+      <div class="kpi"><span>Capital remboursé an 1</span><b>${cad(I.loan - balance(I.loan, I.rate, I.amort, 12))}</b></div>
+    </div>
+    ${I.premium ? `<p class="note">Prime SCHL : ${cad(I.premium)} (${pct(schlPremium(ltv), 2)} du prêt de base), ajoutée au prêt.</p>` : ''}
+    <p class="note" style="margin-top:12px">Sensibilité au renouvellement (paiement mensuel selon le taux) :</p>
+    <div class="scroll"><table><thead><tr><th>Taux</th>${sens.map(s => `<th${s.r === I.rate ? ' class="best"' : ''}>${(s.r * 100).toFixed(2)} %</th>`).join('')}</tr></thead>
+    <tbody><tr><td>Paiement /mois</td>${sens.map(s => `<td${s.r === I.rate ? ' class="best"' : ''}>${cad(s.m)}</td>`).join('')}</tr>
+    <tr><td>Écart vs actuel</td>${sens.map(s => `<td class="${s.m - I.payM > 0.5 ? 'neg' : s.m - I.payM < -0.5 ? 'pos' : ''}">${s.m === I.payM ? '—' : cad(s.m - I.payM)}</td>`).join('')}</tr></tbody></table></div>`;
+
+  // ---------- Scénarios
+  const R = SCENARIOS.map(s => ({s, r: compute(s, I)}));
+  const owners = R.filter(x => x.s.occ !== null);
+  const bestOwner = owners.reduce((a, b) => b.r.cf > a.r.cf ? b : a);
+  const bestAll = R.reduce((a, b) => b.r.cf > a.r.cf ? b : a);
+  const maxAbs = Math.max(...R.map(x => Math.abs(x.r.cfM)), 1);
+
+  const rows = [
+    ['Loyers bruts /an', x => cad(x.gross)],
+    ['− Vacance', x => cad(-x.vacLoss)],
+    ['Revenus nets /an', x => cad(x.egi)],
+    ['− Dépenses /an', () => cad(-I.exp)],
+    ['RNE (NOI) /an', x => cad(x.noi), 'sep'],
+    ['− Service dette /an', x => cad(-x.ds)],
+    ['Cash-flow /an', x => `<span class="${cls(x.cf)}">${cad(x.cf)}</span>`, 'sep'],
+    ['Cash-flow /mois', x => `<span class="${cls(x.cf)}">${cad(x.cfM)}</span>`],
+    ['RCD (NOI ÷ dette)', x => x.dscr.toFixed(2) + (x.dscr < 1.1 ? ' ⚠' : '')],
+    ['Taux de capitalisation', x => pct(x.cap, 2)],
+    ['Rendement sur mise (CoC)', x => `<span class="${cls(x.coc)}">${pct(x.coc, 1)}</span>`],
+    ['Capital remboursé /an', x => cad(x.principal1)],
+    ['Coût net pour se loger /mois', x => x.rentedCount === 3 ? '—' : `<b class="${x.housingM > 0 ? 'neg' : 'pos'}">${cad(x.housingM)}</b>`, 'sep'],
+    ['… après capital remboursé', x => x.rentedCount === 3 ? '—' : cad(x.housingAfterPrincipalM)],
+    ['Loyer renoncé (unité occupée)', x => x.rentedCount === 3 ? '—' : cad(x.occRent)]
+  ];
+  if (I.myRent > 0) rows.push(['Économie vs votre loyer actuel /mois', x => x.rentedCount === 3 ? '—' : `<span class="${cls(I.myRent - x.housingM)}">${cad(I.myRent - x.housingM)}</span>`]);
+
+  $('scen').innerHTML = `
+    <h2>Scénarios d'occupation et d'optimisation</h2>
+    <div class="scroll"><table>
+    <thead><tr><th></th>${R.map(x => `<th class="${x === bestOwner ? 'best' : ''}">${x.s.name.replace('\n', '<br>')}</th>`).join('')}</tr></thead>
+    <tbody>
+      ${rows.map(([label, f, c]) => `<tr class="${c || ''}"><td>${label}</td>${R.map(x => `<td class="${x === bestOwner ? 'best' : ''}">${f(x.r)}</td>`).join('')}</tr>`).join('')}
+      <tr><td>Cash-flow /mois (visuel)</td>${R.map(x => `<td class="${x === bestOwner ? 'best' : ''}"><span class="bar" style="width:${Math.max(4, Math.abs(x.r.cfM) / maxAbs * 100)}%;background:${x.r.cf >= 0 ? 'var(--pos)' : 'var(--neg)'};margin-left:auto"></span></td>`).join('')}</tr>
+    </tbody></table></div>
+    <p class="note">Colonne surlignée = meilleure option avec occupation du propriétaire. La vacance ne s'applique qu'aux logements loués. Les scénarios « optimisé » supposent que les loyers cibles sont atteints (rotation de locataires, rénovations, règles du TAL).</p>`;
+
+  // ---------- Recommandation
+  const ownersCur = owners.filter(x => !x.s.opt).sort((a, b) => b.r.cf - a.r.cf);
+  const ownersOpt = owners.filter(x => x.s.opt).sort((a, b) => b.r.cf - a.r.cf);
+  const fiveCur = R[2].r, a4Cur = R[3].r, b4Cur = R[4].r;
+  const allCur = R[0].r, allOpt = R[1].r;
+  const extraSpace = fiveCur.housingM - Math.min(a4Cur.housingM, b4Cur.housingM);
+  const bestCur = ownersCur[0];
+  const optGain = (allOpt.cf - allCur.cf);
+  const li = x => `<li><b>${x.s.name.replace('\n', ' ')}</b> — ${cad(x.r.housingM)}/mois net (${cad(x.r.housingAfterPrincipalM)} après capital) · RCD ${x.r.dscr.toFixed(2)}</li>`;
+  $('reco').innerHTML = `
+    <h2>Suggestions</h2>
+    <p><b>Où déménager ?</b> Avec les loyers actuels, l'option la moins coûteuse est <b>${bestCur.s.name.replace('\n', ' ')}</b><span class="tag">Meilleur</span> : il vous en coûte <b>${cad(bestCur.r.housingM)}/mois</b> pour vous loger
+      (${cad(bestCur.r.housingAfterPrincipalM)} si on déduit le capital que vous remboursez).</p>
+    <p>Occuper le 5½ coûte <b>${cad(extraSpace)}/mois de plus</b> que le 4½ le moins cher — c'est le prix de la pièce additionnelle. À vous de voir si l'espace vaut ce montant (${cad(extraSpace * 12)}/an).</p>
+    <p><b>Classement actuel (loyers en place) :</b></p><ol>${ownersCur.map(li).join('')}</ol>
+    <p style="margin-top:12px"><b>Après optimisation :</b> tout loué optimisé rapporte ${cad(allOpt.cf)}/an (${cad(allOpt.cfM)}/mois), soit <b class="${cls(optGain)}">${cad(optGain)}/an</b> vs loyers actuels. ${I.units[0].opt < I.units[0].cur ? `<span class="warn">Note : le loyer optimisé du 5½ (${cad(I.units[0].opt)}) est <i>inférieur</i> au loyer actuel (${cad(I.units[0].cur)}) — vérifiez si c'est voulu.</span>` : ''}</p>
+    <ol>${ownersOpt.map(li).join('')}</ol>
+    <p>Meilleur scénario global : <b>${bestAll.s.name.replace('\n', ' ')}</b> (${cad(bestAll.r.cfM)}/mois de cash-flow).
+      ${bestAll.r.dscr < 1 ? '' : ''}</p>
+    ${owners.some(x => x.r.dscr < 1.1) ? `<p class="note">⚠ Plusieurs scénarios avec occupation ont un RCD inférieur à 1,1 : le prêteur regarde souvent les revenus de l'immeuble avec ou sans votre unité — confirmez la méthode de calcul avec votre courtier.</p>` : ''}`;
+
+  // ---------- Projection
+  const keep = $('projSel') ? $('projSel').value : '3';
+  const sel = SCENARIOS[+keep];
+  $('proj').innerHTML = `
+    <h2>Projection 10 ans — prise de valeur et hausse des dépenses</h2>
+    <label for="projSel">Scénario</label>
+    <select id="projSel">${SCENARIOS.map((s, i) => `<option value="${i}"${i == keep ? ' selected' : ''}>${s.name.replace('\n', ' ')}</option>`).join('')}</select>
+    <div id="projBody" style="margin-top:12px"></div>`;
+  $('projSel').addEventListener('change', () => drawProj(I));
+  drawProj(I);
+}
+
+function drawProj(I) {
+  const s = SCENARIOS[+$('projSel').value];
+  const b = compute(s, I);
+  let cum = 0, out = [];
+  for (let t = 1; t <= 10; t++) {
+    const gR = Math.pow(1 + I.gRent, t - 1), gE = Math.pow(1 + I.gExp, t - 1);
+    const egi = b.egi * gR, exp = I.exp * gE, noi = egi - exp, cf = noi - b.ds;
+    cum += cf;
+    const val = I.offer * Math.pow(1 + I.gVal, t);
+    const bal = balance(I.loan, I.rate, I.amort, t * 12);
+    out.push({t, egi, exp, noi, cf, val, bal, eq: val - bal, cum});
+  }
+  const last = out[9];
+  const gain = last.eq - I.cash + last.cum;
+  $('projBody').innerHTML = `
+    <div class="kpis">
+      <div class="kpi"><span>Valeur an 10</span><b>${cad(last.val)}</b></div>
+      <div class="kpi"><span>Équité an 10</span><b>${cad(last.eq)}</b></div>
+      <div class="kpi"><span>Cash-flow cumulé</span><b class="${cls(last.cum)}">${cad(last.cum)}</b></div>
+      <div class="kpi"><span>Gain total (avant impôt, vente)</span><b class="${cls(gain)}">${cad(gain)}</b></div>
+      <div class="kpi"><span>Multiple sur mise</span><b>${I.cash ? ((last.eq + last.cum) / I.cash).toFixed(2) + '×' : '—'}</b></div>
+    </div>
+    <div class="scroll" style="margin-top:12px"><table>
+      <thead><tr><th>An</th><th>Revenus nets</th><th>Dépenses</th><th>RNE</th><th>Service dette</th><th>Cash-flow</th><th>Valeur</th><th>Solde hyp.</th><th>Équité</th></tr></thead>
+      <tbody>${out.map(o => `<tr><td>${o.t}</td><td>${cad(o.egi)}</td><td>${cad(o.exp)}</td><td>${cad(o.noi)}</td><td>${cad(b.ds)}</td><td class="${cls(o.cf)}">${cad(o.cf)}</td><td>${cad(o.val)}</td><td>${cad(o.bal)}</td><td>${cad(o.eq)}</td></tr>`).join('')}</tbody>
+    </table></div>
+    <p class="note">Hypothèses : loyers +${pct(I.gRent, 1)}/an, dépenses +${pct(I.gExp, 1)}/an, valeur +${pct(I.gVal, 1)}/an, taux fixe constant (le service de dette ne change pas). Si les dépenses croissent plus vite que les loyers, le cash-flow s'érode : comparez avec la colonne « Dépenses ».</p>`;
+}
+
+// ---------- événements
+document.querySelectorAll('input').forEach(e => e.addEventListener('input', render));
+$('prog').addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if (!btn || btn.disabled) return;
+  program = btn.dataset.p;
+  document.querySelectorAll('#prog button').forEach(b => b.classList.toggle('on', b === btn));
+  $('amort').value = PROGRAMS[program].amort;
+  if (num('down') < PROGRAMS[program].minDown * 100) $('down').value = PROGRAMS[program].minDown * 100;
+  render();
+});
+render();
+</script>
+</body>
+</html>
