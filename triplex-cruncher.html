@@ -131,13 +131,20 @@ h3{font-size:15px;margin:18px 0 4px}
     <div class="seg" id="prog">
       <button data-p="conv" class="on">Conventionnel</button>
       <button data-p="schl">SCHL assuré</button>
+      <button data-p="assume">Reprise du prêt du vendeur</button>
       <button data-p="aph" disabled title="APH Select exige 5 logements et plus">APH Select 50 ans</button>
     </div>
     <p class="note" id="progNote"></p>
+    <div class="grid" id="assumeBox" style="margin-top:12px;display:none">
+      <div class="f"><label>Solde du prêt repris</label><span class="u">$</span><input type="number" id="aLoan" value="282000" step="1000"></div>
+      <div class="f pct"><label>Taux du prêt repris (%)</label><input type="number" id="aRate" value="3.5" step="0.05"></div>
+      <div class="f pct"><label>Amortissement restant (ans)</label><input type="number" id="aAmort" value="26" step="0.5"></div>
+      <div class="f pct"><label>Terme restant avant renouvellement (ans)</label><input type="number" id="aTerm" value="1" step="0.25" min="0.25"></div>
+    </div>
     <div class="grid" style="margin-top:12px">
-      <div><label>Mise de fonds <span class="v" id="downV"></span></label><input type="range" id="down" min="5" max="50" step="1" value="20"></div>
-      <div class="f pct"><label>Taux hypothécaire (%)</label><input type="number" id="rate" value="4.5" step="0.05"></div>
-      <div class="f pct"><label>Amortissement (ans)</label><input type="number" id="amort" value="30" min="5" max="40"></div>
+      <div class="newonly"><label>Mise de fonds <span class="v" id="downV"></span></label><input type="range" id="down" min="5" max="50" step="1" value="20"></div>
+      <div class="f pct newonly"><label>Taux hypothécaire (%)</label><input type="number" id="rate" value="4.5" step="0.05"></div>
+      <div class="f pct newonly"><label>Amortissement (ans)</label><input type="number" id="amort" value="30" min="5" max="40"></div>
       <div class="f"><label>Frais d'acquisition (notaire, inspection, droits de mutation)</label><span class="u">$</span><input type="number" id="closing" value="8000" step="500"></div>
     </div>
   </section>
@@ -157,6 +164,7 @@ h3{font-size:15px;margin:18px 0 4px}
   </section>
 
   <section class="card" id="debt"></section>
+  <section class="card" id="cmp"></section>
   <section class="card" id="scen"></section>
   <section class="card" id="vals"></section>
   <section class="card reco" id="reco"></section>
@@ -172,8 +180,9 @@ const cad = (n, d = 0) => (n < 0 ? '−' : '') + Math.abs(n).toLocaleString('fr-
 const pct = (n, d = 1) => (n * 100).toLocaleString('fr-CA', {minimumFractionDigits: d, maximumFractionDigits: d}) + ' %';
 const cls = n => n >= 0 ? 'pos' : 'neg';
 
-let program = 'conv';
+let program = 'conv', newProg = 'conv';
 const PROGRAMS = {
+  assume: {label: 'Reprise du prêt', minDown: 0, amort: 26, note: "Reprise du prêt du vendeur : vous payez le prix d'achat en reprenant son solde hypothécaire; la différence est votre mise de fonds. Vérifiez avec le prêteur qu'il accepte la cession (et confirmez le taux, l'amortissement et le terme restants). Au renouvellement, le nouveau taux s'applique."},
   conv: {label: 'Conventionnel', minDown: 0.15, amort: 30, note: 'Conventionnel : mise de fonds min. 15 %, amortissement max. 30 ans, sans prime.'},
   schl: {label: 'SCHL assuré', minDown: 0.10, amort: 25, note: 'SCHL assuré (2 à 4 logements, propriétaire-occupant) : mise de fonds min. 10 %, prime capitalisée au prêt (3,10 % si LTV 85–90 %, 2,80 % si 80–85 %), amortissement 25 ans (30 ans possible pour premiers acheteurs — à confirmer).'}
 };
@@ -198,17 +207,26 @@ function schlPremium(ltv) {
   return 0;
 }
 
-function getInputs() {
+function getInputs(prog = program) {
   const offer = num('offer');
-  const down = num('down') / 100;
-  const base = offer * (1 - down);
-  const premium = program === 'schl' ? base * schlPremium(1 - down) : 0;
-  const loan = base + premium;
-  const rate = num('rate') / 100, amort = num('amort') || 25;
+  let down, base, premium, loan, rate, amort, firstTerm, cash;
+  if (prog === 'assume') {
+    loan = base = num('aLoan'); premium = 0;
+    down = offer ? Math.max(0, (offer - loan) / offer) : 0;
+    rate = num('aRate') / 100; amort = num('aAmort') || 25; firstTerm = Math.max(0.25, num('aTerm') || 1);
+    cash = Math.max(0, offer - loan) + num('closing');
+  } else {
+    down = num('down') / 100;
+    base = offer * (1 - down);
+    premium = prog === 'schl' ? base * schlPremium(1 - down) : 0;
+    loan = base + premium;
+    rate = num('rate') / 100; amort = num('amort') || 25; firstTerm = Math.max(1, num('term') || 5);
+    cash = offer * down + num('closing');
+  }
   return {
-    offer, ask: num('ask'), down, base, premium, loan, rate, amort,
+    prog, offer, ask: num('ask'), down, base, premium, loan, rate, amort, firstTerm,
     payM: pmt(loan, rate, amort),
-    cash: offer * down + num('closing'),
+    cash,
     vac: num('vac') / 100,
     exp: [...document.querySelectorAll('.exp')].reduce((s, e) => s + (parseFloat(e.value) || 0), 0),
     units: [0, 1, 2].map(i => ({name: ['5½', '4½ (A)', '4½ (B)'][i], cur: num('cur' + i), opt: num('opt' + i)})),
@@ -224,10 +242,8 @@ const SCENARIOS = [
   {name: 'Tout loué\noptimisé', occ: null, opt: true},
   {name: "J'occupe\n5½", occ: 0, opt: false},
   {name: "J'occupe\n4½ (A) 710 $", occ: 1, opt: false},
-  {name: "J'occupe\n4½ (B) 780 $", occ: 2, opt: false},
   {name: "J'occupe 5½\n+ optimisé", occ: 0, opt: true},
-  {name: "J'occupe 4½ (A)\n+ optimisé", occ: 1, opt: true},
-  {name: "J'occupe 4½ (B)\n+ optimisé", occ: 2, opt: true}
+  {name: "J'occupe 4½ (A)\n+ optimisé", occ: 1, opt: true}
 ];
 
 function compute(s, I, yearsOut = 1) {
@@ -261,13 +277,16 @@ function render() {
   const P = PROGRAMS[program];
   $('vacV').textContent = pct(I.vac, 1);
   $('downV').textContent = pct(I.down, 0);
+  document.querySelectorAll('.newonly').forEach(e => e.style.display = program === 'assume' ? 'none' : '');
+  $('assumeBox').style.display = program === 'assume' ? '' : 'none';
   $('expTotal').textContent = cad(I.exp);
 
   const curGrossY = I.units.reduce((t, u) => t + u.cur, 0) * 12;
   const noFive = (I.units[1].cur + I.units[2].cur) * 12;
   $('rentNote').innerHTML = `Loyers actuels : <b>${cad(curGrossY)}</b>/an (${cad(curGrossY / 12)}/mois). Sans le 5½ : ${cad(noFive)}/an — proche des 17 940 $ de votre grille (scénario « j'occupe le 5½ »).`;
   $('progNote').textContent = P.note;
-  const minWarn = I.down < P.minDown - 1e-9;
+  const minWarn = program !== 'assume' && I.down < P.minDown - 1e-9;
+  if (program === 'assume') $('progNote').innerHTML += ` Mise de fonds implicite : <b>${cad(Math.max(0, I.offer - I.loan))}</b> (prix ${cad(I.offer)} − prêt ${cad(I.loan)}) + frais ${cad(num('closing'))} = <b>${cad(I.cash)}</b> à sortir.`;
   if (minWarn) $('progNote').innerHTML += ` <span class="warn">⚠ Mise de fonds sous le minimum (${pct(P.minDown, 0)}).</span>`;
 
   // ---------- Service de la dette
@@ -332,9 +351,9 @@ function render() {
   // ---------- Recommandation
   const ownersCur = owners.filter(x => !x.s.opt).sort((a, b) => b.r.cf - a.r.cf);
   const ownersOpt = owners.filter(x => x.s.opt).sort((a, b) => b.r.cf - a.r.cf);
-  const fiveCur = R[2].r, a4Cur = R[3].r, b4Cur = R[4].r;
+  const fiveCur = R[2].r, a4Cur = R[3].r;
   const allCur = R[0].r, allOpt = R[1].r;
-  const extraSpace = fiveCur.housingM - Math.min(a4Cur.housingM, b4Cur.housingM);
+  const extraSpace = fiveCur.housingM - a4Cur.housingM;
   const bestCur = ownersCur[0];
   const optGain = (allOpt.cf - allCur.cf);
   const li = x => `<li><b>${x.s.name.replace('\n', ' ')}</b> — ${cad(x.r.housingM)}/mois net (${cad(x.r.housingAfterPrincipalM)} après capital) · RCD ${x.r.dscr.toFixed(2)}</li>`;
@@ -342,7 +361,7 @@ function render() {
     <h2>Suggestions</h2>
     <p><b>Où déménager ?</b> Avec les loyers actuels, l'option la moins coûteuse est <b>${bestCur.s.name.replace('\n', ' ')}</b><span class="tag">Meilleur</span> : il vous en coûte <b>${cad(bestCur.r.housingM)}/mois</b> pour vous loger
       (${cad(bestCur.r.housingAfterPrincipalM)} si on déduit le capital que vous remboursez).</p>
-    <p>Occuper le 5½ coûte <b>${cad(extraSpace)}/mois de plus</b> que le 4½ le moins cher — c'est le prix de la pièce additionnelle. À vous de voir si l'espace vaut ce montant (${cad(extraSpace * 12)}/an).</p>
+    <p>Occuper le 5½ coûte <b>${cad(extraSpace)}/mois de plus</b> que le 4½ à ${cad(I.units[1].cur)} — c'est le prix de la pièce additionnelle. À vous de voir si l'espace vaut ce montant (${cad(extraSpace * 12)}/an).</p>
     <p><b>Classement actuel (loyers en place) :</b></p><ol>${ownersCur.map(li).join('')}</ol>
     <p style="margin-top:12px"><b>Après optimisation :</b> tout loué optimisé rapporte ${cad(allOpt.cf)}/an (${cad(allOpt.cfM)}/mois), soit <b class="${cls(optGain)}">${cad(optGain)}/an</b> vs loyers actuels. ${I.units[0].opt < I.units[0].cur ? `<span class="warn">Note : le loyer optimisé du 5½ (${cad(I.units[0].opt)}) est <i>inférieur</i> au loyer actuel (${cad(I.units[0].cur)}) — vérifiez si c'est voulu.</span>` : ''}</p>
     <ol>${ownersOpt.map(li).join('')}</ol>
@@ -372,6 +391,41 @@ function render() {
     <tbody>${vrows.map(([l, f, c]) => `<tr class="${c || ''}"><td>${l}</td>${M.map((m, i) => `<td class="${i === bestVal ? 'best' : ''}">${f(m)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
     <p class="note">Le cash-flow seul sous-estime la richesse créée : le capital que vous remboursez et la prise de valeur s'ajoutent. Les hypothèses de valeur, de loyers et de dépenses sont celles de la section « Hypothèses de croissance ». Hors impôt.</p>`;
 
+  // ---------- Comparaison : nouveau prêt vs reprise du prêt
+  {
+    const In = getInputs(newProg), Ia = getInputs('assume');
+    const Sn = schedule(In), Sa = schedule(Ia);
+    const Mn = SCENARIOS.map(s => model(s, In, Sn)), Ma = SCENARIOS.map(s => model(s, Ia, Sa));
+    const yr = (S, t) => S[Math.min(t, S.length) - 1];
+    const dl = (a, b, f = cad, good = 1) => { const d = b - a, eps = Math.max(Math.abs(a), Math.abs(b)) < 1 ? 1e-7 : 0.5; return `<span class="${d * good > eps ? 'pos' : d * good < -eps ? 'neg' : ''}">${Math.abs(d) < eps ? '—' : f(d)}</span>`; };
+    const dRows = [
+      ['Prêt au départ', In.loan, Ia.loan, cad, 0],
+      ['Taux de départ', In.rate, Ia.rate, v => pct(v, 2), -1],
+      ['Amortissement restant (ans)', In.amort, Ia.amort, v => v.toLocaleString('fr-CA', {maximumFractionDigits: 1}), 0],
+      ['Terme avant renouvellement (ans)', In.firstTerm, Ia.firstTerm, v => v.toLocaleString('fr-CA', {maximumFractionDigits: 2}), 0],
+      ['Paiement mensuel de départ', In.payM, Ia.payM, cad, -1],
+      ['Intérêts an 1', Sn[0].int, Sa[0].int, cad, -1],
+      ['Capital remboursé an 1', Sn[0].prin, Sa[0].prin, cad, 1],
+      ['Mise de fonds + frais', In.cash, Ia.cash, cad, -1],
+      ['Solde hypothécaire an 5', yr(Sn, 5).bal, yr(Sa, 5).bal, cad, -1],
+      [`Solde hypothécaire an ${In.T}`, Sn[Sn.length - 1].bal, Sa[Sa.length - 1].bal, cad, -1]
+    ];
+    const srows = SCENARIOS.map((s, i) => {
+      const a = Mn[i], b = Ma[i];
+      return `<tr><td>${s.name.replace('\n', ' ')}</td><td>${cad(a.y1.cf / 12)}</td><td>${cad(b.y1.cf / 12)}</td><td>${cad(a.y1.creation / 12)}</td><td>${cad(b.y1.creation / 12)}</td><td>${a.irr === null ? 'n/d' : pct(a.irr, 1)}</td><td>${b.irr === null ? 'n/d' : pct(b.irr, 1)}</td><td>${dl(a.gain, b.gain)}</td></tr>`;
+    }).join('');
+    $('cmp').innerHTML = `
+      <h2>Nouveau prêt vs reprise du prêt du vendeur</h2>
+      <div class="scroll"><table>
+        <thead><tr><th></th><th>Nouveau prêt<br>(${PROGRAMS[newProg].label})</th><th>Reprise du prêt</th><th>Écart</th></tr></thead>
+        <tbody>${dRows.map(([l, a, b, f, g]) => `<tr><td>${l}</td><td>${f(a)}</td><td>${f(b)}</td><td>${dl(a, b, f, g)}</td></tr>`).join('')}</tbody></table></div>
+      <h3>Impact par scénario</h3>
+      <div class="scroll"><table>
+        <thead><tr><th>Scénario</th><th>Cash-flow /mois<br>nouveau</th><th>Cash-flow /mois<br>reprise</th><th>Création /mois<br>nouveau</th><th>Création /mois<br>reprise</th><th>TRI ${In.T} ans<br>nouveau</th><th>TRI ${In.T} ans<br>reprise</th><th>Écart gain ${In.T} ans</th></tr></thead>
+        <tbody>${srows}</tbody></table></div>
+      <p class="note">L'avantage de la reprise est le taux plus bas, mais seulement jusqu'au renouvellement (${Ia.firstTerm.toLocaleString('fr-CA')} an(s) restant(s) avec vos hypothèses) : ensuite le taux de renouvellement (${pct(Ia.rRate, 2)}) s'applique aux deux options. Les hypothèses du prêt repris (taux, amortissement et terme restants) sont à confirmer avec la vendeuse.</p>`;
+  }
+
   // ---------- Portrait économique détaillé (un scénario)
   const keep = $('projSel') ? $('projSel').value : '3';
   $('proj').innerHTML = `
@@ -385,14 +439,14 @@ function render() {
 
 // ---------- moteur hypothécaire mois par mois (paiement fixe par terme, recalculé au renouvellement)
 function schedule(I) {
-  let bal = I.loan, payment = 0, rate = I.rate;
+  let bal = I.loan, payment = 0, rate = I.rate, next = 0;
   const total = I.amort * 12, rows = [];
   for (let t = 1; t <= I.T; t++) {
     let pay = 0, int = 0, prin = 0;
     for (let m = 0; m < 12; m++) {
       const k = (t - 1) * 12 + m;
       if (bal <= 0.005 || k >= total) continue;
-      if (k % (I.term * 12) === 0) { rate = k === 0 ? I.rate : I.rRate; payment = pmt(bal, rate, (total - k) / 12); }
+      if (k === next) { rate = k === 0 ? I.rate : I.rRate; payment = pmt(bal, rate, (total - k) / 12); next = k + Math.round((k === 0 ? I.firstTerm : I.term) * 12); }
       const i = bal * mRate(rate);
       const p = Math.min(bal, payment - i);
       bal -= p; int += i; prin += p; pay += i + p;
@@ -524,8 +578,11 @@ $('prog').addEventListener('click', e => {
   if (!btn || btn.disabled) return;
   program = btn.dataset.p;
   document.querySelectorAll('#prog button').forEach(b => b.classList.toggle('on', b === btn));
-  $('amort').value = PROGRAMS[program].amort;
-  if (num('down') < PROGRAMS[program].minDown * 100) $('down').value = PROGRAMS[program].minDown * 100;
+  if (program !== 'assume') {
+    newProg = program;
+    $('amort').value = PROGRAMS[program].amort;
+    if (num('down') < PROGRAMS[program].minDown * 100) $('down').value = PROGRAMS[program].minDown * 100;
+  }
   render();
 });
 render();
