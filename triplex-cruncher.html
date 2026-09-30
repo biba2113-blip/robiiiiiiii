@@ -62,6 +62,17 @@ select{padding:9px;border:1px solid var(--line);border-radius:8px;background:var
 .units{display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:8px;align-items:end}
 .units .h{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
 .units .n{padding-bottom:10px;font-weight:700}
+
+:root{--c-cap:#2a78d6;--c-int:#eb6834;--c-cf:#1baf7a;--c-app:#4a3aa7;--c-avoid:#eda100}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--c-cap:#3987e5;--c-int:#d95926;--c-cf:#199e70;--c-app:#9085e9;--c-avoid:#c98500}}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;margin:8px 0 4px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+svg.chart{width:100%;height:auto;display:block}
+svg.chart text{fill:var(--muted);font-size:11px;font-family:inherit}
+svg.chart .grid{stroke:var(--line);stroke-width:1}
+svg.chart .zero{stroke:var(--muted);stroke-width:1}
+svg.chart rect.seg{stroke:var(--card);stroke-width:2}
+h3{font-size:15px;margin:18px 0 4px}
 </style>
 </head>
 <body>
@@ -137,11 +148,17 @@ select{padding:9px;border:1px solid var(--line);border-radius:8px;background:var
       <div class="f pct"><label>Hausse des loyers /an (%)</label><input type="number" id="gRent" value="2" step="0.25"></div>
       <div class="f pct"><label>Hausse des dépenses /an (%)</label><input type="number" id="gExp" value="3" step="0.25"></div>
       <div class="f pct"><label>Prise de valeur /an (%)</label><input type="number" id="gVal" value="3" step="0.25"></div>
+      <div class="f pct"><label>Terme hypothécaire (ans)</label><input type="number" id="term" value="5" min="1" max="10"></div>
+      <div class="f pct"><label>Taux au renouvellement (%)</label><input type="number" id="rRate" value="4.5" step="0.05"></div>
+      <div class="f pct"><label>Horizon d'analyse (ans)</label><input type="number" id="horizon" value="10" min="1" max="30"></div>
+      <div class="f pct"><label>Frais de vente (% commission, etc.)</label><input type="number" id="sell" value="5" step="0.5"></div>
     </div>
+    <p class="note">Le paiement est fixe durant un terme, puis recalculé au renouvellement sur le solde restant et l'amortissement restant. Les intérêts diminuent donc d'année en année et la part de capital augmente.</p>
   </section>
 
   <section class="card" id="debt"></section>
   <section class="card" id="scen"></section>
+  <section class="card" id="vals"></section>
   <section class="card reco" id="reco"></section>
   <section class="card" id="proj"></section>
 
@@ -196,7 +213,9 @@ function getInputs() {
     exp: [...document.querySelectorAll('.exp')].reduce((s, e) => s + (parseFloat(e.value) || 0), 0),
     units: [0, 1, 2].map(i => ({name: ['5½', '4½ (A)', '4½ (B)'][i], cur: num('cur' + i), opt: num('opt' + i)})),
     gRent: num('gRent') / 100, gExp: num('gExp') / 100, gVal: num('gVal') / 100,
-    myRent: num('myRent')
+    myRent: num('myRent'),
+    term: Math.max(1, num('term') || 5), rRate: (parseFloat($('rRate').value) || 0) / 100,
+    T: Math.min(30, Math.max(1, Math.round(num('horizon')) || 10)), sell: num('sell') / 100
   };
 }
 
@@ -265,7 +284,8 @@ function render() {
       <div class="kpi"><span>Mise de fonds + frais</span><b>${cad(I.cash)}</b></div>
       <div class="kpi"><span>Paiement mensuel</span><b>${cad(I.payM)}</b></div>
       <div class="kpi"><span>Service annuel</span><b>${cad(I.payM * 12)}</b></div>
-      <div class="kpi"><span>Capital remboursé an 1</span><b>${cad(I.loan - balance(I.loan, I.rate, I.amort, 12))}</b></div>
+      <div class="kpi"><span>Intérêts an 1 (/mois)</span><b>${cad((I.payM * 12 - (I.loan - balance(I.loan, I.rate, I.amort, 12))) / 12)}</b></div>
+      <div class="kpi"><span>Capital an 1 (/mois)</span><b>${cad((I.loan - balance(I.loan, I.rate, I.amort, 12)) / 12)}</b></div>
     </div>
     ${I.premium ? `<p class="note">Prime SCHL : ${cad(I.premium)} (${pct(schlPremium(ltv), 2)} du prêt de base), ajoutée au prêt.</p>` : ''}
     <p class="note" style="margin-top:12px">Sensibilité au renouvellement (paiement mensuel selon le taux) :</p>
@@ -330,45 +350,171 @@ function render() {
       ${bestAll.r.dscr < 1 ? '' : ''}</p>
     ${owners.some(x => x.r.dscr < 1.1) ? `<p class="note">⚠ Plusieurs scénarios avec occupation ont un RCD inférieur à 1,1 : le prêteur regarde souvent les revenus de l'immeuble avec ou sans votre unité — confirmez la méthode de calcul avec votre courtier.</p>` : ''}`;
 
-  // ---------- Projection
+  // ---------- Création de valeur (tous scénarios)
+  const SCH = schedule(I);
+  const M = SCENARIOS.map(s => model(s, I, SCH));
+  const bestVal = M.reduce((a, b, i) => b.y1.creation > M[a].y1.creation ? i : a, 0);
+  const vrows = [
+    ['Cash-flow (après dette) /mois', m => `<span class="${cls(m.y1.cf)}">${cad(m.y1.cf / 12)}</span>`],
+    ['+ Capital remboursé /mois', m => cad(m.y1.prin / 12)],
+    ['+ Prise de valeur /mois', m => cad(m.y1.appr / 12)],
+    ...(I.myRent > 0 ? [['+ Loyer évité /mois', m => cad(m.y1.avoid / 12)]] : []),
+    ['= Création de valeur /mois', m => `<b class="${cls(m.y1.creation)}">${cad(m.y1.creation / 12)}</b>`, 'sep'],
+    ['= Création de valeur /an', m => `<b class="${cls(m.y1.creation)}">${cad(m.y1.creation)}</b>`],
+    ['Rendement total sur mise (an 1)', m => pct(I.cash ? m.y1.creation / I.cash : 0, 1)],
+    [`TRI sur ${I.T} ans (après frais de vente)`, m => m.irr === null ? 'n/d' : `<b>${pct(m.irr, 1)}</b>`],
+    [`Gain net cumulé ${I.T} ans`, m => `<span class="${cls(m.gain)}">${cad(m.gain)}</span>`]
+  ];
+  $('vals').innerHTML = `
+    <h2>Création de valeur réelle par scénario (an 1)</h2>
+    <div class="scroll"><table>
+    <thead><tr><th></th>${SCENARIOS.map((s, i) => `<th class="${i === bestVal ? 'best' : ''}">${s.name.replace('\n', '<br>')}</th>`).join('')}</tr></thead>
+    <tbody>${vrows.map(([l, f, c]) => `<tr class="${c || ''}"><td>${l}</td>${M.map((m, i) => `<td class="${i === bestVal ? 'best' : ''}">${f(m)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+    <p class="note">Le cash-flow seul sous-estime la richesse créée : le capital que vous remboursez et la prise de valeur s'ajoutent. Les hypothèses de valeur, de loyers et de dépenses sont celles de la section « Hypothèses de croissance ». Hors impôt.</p>`;
+
+  // ---------- Portrait économique détaillé (un scénario)
   const keep = $('projSel') ? $('projSel').value : '3';
-  const sel = SCENARIOS[+keep];
   $('proj').innerHTML = `
-    <h2>Projection 10 ans — prise de valeur et hausse des dépenses</h2>
+    <h2>Portrait économique détaillé</h2>
     <label for="projSel">Scénario</label>
     <select id="projSel">${SCENARIOS.map((s, i) => `<option value="${i}"${i == keep ? ' selected' : ''}>${s.name.replace('\n', ' ')}</option>`).join('')}</select>
     <div id="projBody" style="margin-top:12px"></div>`;
-  $('projSel').addEventListener('change', () => drawProj(I));
-  drawProj(I);
+  $('projSel').addEventListener('change', () => drawProj(I, SCH));
+  drawProj(I, SCH);
 }
 
-function drawProj(I) {
-  const s = SCENARIOS[+$('projSel').value];
-  const b = compute(s, I);
-  let cum = 0, out = [];
-  for (let t = 1; t <= 10; t++) {
-    const gR = Math.pow(1 + I.gRent, t - 1), gE = Math.pow(1 + I.gExp, t - 1);
-    const egi = b.egi * gR, exp = I.exp * gE, noi = egi - exp, cf = noi - b.ds;
-    cum += cf;
-    const val = I.offer * Math.pow(1 + I.gVal, t);
-    const bal = balance(I.loan, I.rate, I.amort, t * 12);
-    out.push({t, egi, exp, noi, cf, val, bal, eq: val - bal, cum});
+// ---------- moteur hypothécaire mois par mois (paiement fixe par terme, recalculé au renouvellement)
+function schedule(I) {
+  let bal = I.loan, payment = 0, rate = I.rate;
+  const total = I.amort * 12, rows = [];
+  for (let t = 1; t <= I.T; t++) {
+    let pay = 0, int = 0, prin = 0;
+    for (let m = 0; m < 12; m++) {
+      const k = (t - 1) * 12 + m;
+      if (bal <= 0.005 || k >= total) continue;
+      if (k % (I.term * 12) === 0) { rate = k === 0 ? I.rate : I.rRate; payment = pmt(bal, rate, (total - k) / 12); }
+      const i = bal * mRate(rate);
+      const p = Math.min(bal, payment - i);
+      bal -= p; int += i; prin += p; pay += i + p;
+    }
+    rows.push({t, pay, int, prin, bal, rate});
   }
-  const last = out[9];
-  const gain = last.eq - I.cash + last.cum;
+  return rows;
+}
+
+function irrOf(flows) {
+  const npv = r => flows.reduce((s, f, t) => s + f / Math.pow(1 + r, t), 0);
+  let lo = -0.9, hi = 2;
+  if (npv(lo) * npv(hi) > 0) return null;
+  for (let i = 0; i < 100; i++) { const mid = (lo + hi) / 2; (npv(lo) * npv(mid) <= 0) ? hi = mid : lo = mid; }
+  return (lo + hi) / 2;
+}
+
+function model(s, I, SCH) {
+  const b = compute(s, I);
+  const avoidBase = s.occ !== null ? I.myRent * 12 : 0;
+  const rows = []; let prevVal = I.offer, cum = 0, cumCreation = 0;
+  for (let t = 1; t <= I.T; t++) {
+    const sr = SCH[t - 1];
+    const egi = b.egi * Math.pow(1 + I.gRent, t - 1), exp = I.exp * Math.pow(1 + I.gExp, t - 1);
+    const noi = egi - exp, cf = noi - sr.pay;
+    const val = I.offer * Math.pow(1 + I.gVal, t), appr = val - prevVal;
+    const avoid = avoidBase * Math.pow(1 + I.gRent, t - 1);
+    const creation = cf + sr.prin + appr + avoid;
+    const eq = val - sr.bal;
+    cum += cf + avoid; cumCreation += creation;
+    rows.push({t, egi, exp, noi, pay: sr.pay, int: sr.int, prin: sr.prin, rate: sr.rate, cf, appr, avoid, creation,
+      val, bal: sr.bal, eq, cum, cumCreation, dscr: sr.pay ? noi / sr.pay : 0, ltv: val ? sr.bal / val : 0,
+      roe: (t === 1 ? I.cash : rows[t - 2].eq) ? creation / (t === 1 ? I.cash : rows[t - 2].eq) : 0});
+    prevVal = val;
+  }
+  const last = rows[rows.length - 1];
+  const flows = [-I.cash, ...rows.map(r => r.cf + r.avoid)];
+  flows[flows.length - 1] += last.val * (1 - I.sell) - last.bal;
+  const netSale = last.val * (1 - I.sell) - last.bal;
+  return {b, rows, y1: rows[0], last, irr: irrOf(flows), netSale, gain: netSale - I.cash + last.cum};
+}
+
+// ---------- graphiques SVG (barres empilées, négatifs sous la ligne zéro)
+function stackChart(rows, series, label) {
+  const W = 640, H = 230, pl = 52, pr = 8, pt = 10, pb = 24;
+  let max = 0, min = 0;
+  rows.forEach(r => { let p = 0, n = 0; series.forEach(s => { const v = r[s.key]; v >= 0 ? p += v : n += v; }); max = Math.max(max, p); min = Math.min(min, n); });
+  if (max === min) max = 1;
+  const raw = (max - min) / 4, mag = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / mag;
+  const step = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * mag;
+  const top = Math.ceil(max / step) * step, bot = Math.floor(min / step) * step;
+  const y = v => pt + (top - v) / (top - bot) * (H - pt - pb);
+  const bw = (W - pl - pr) / rows.length, w = Math.min(bw * 0.66, 38);
+  let g = '';
+  for (let v = bot; v <= top + 1e-6; v += step) g += `<line class="${Math.abs(v) < 1e-6 ? 'zero' : 'grid'}" x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}"/><text x="${pl - 6}" y="${y(v) + 4}" text-anchor="end">${Math.round(v / 1000)} k</text>`;
+  rows.forEach((r, i) => {
+    const x = pl + i * bw + (bw - w) / 2; let pos = 0, neg = 0;
+    series.forEach(s => {
+      const v = r[s.key]; if (!v) return;
+      const y0 = v >= 0 ? y(pos) : y(neg), y1 = v >= 0 ? y(pos + v) : y(neg + v);
+      v >= 0 ? pos += v : neg += v;
+      g += `<rect class="seg" x="${x}" y="${Math.min(y0, y1)}" width="${w}" height="${Math.max(Math.abs(y1 - y0), 0.5)}" rx="2" fill="var(${s.color})"><title>An ${r.t} — ${s.label} : ${cad(v)}</title></rect>`;
+    });
+    g += `<text x="${x + w / 2}" y="${H - 6}" text-anchor="middle">${r.t}</text>`;
+  });
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${label}">${g}</svg>
+    <div class="legend">${series.map(s => `<span><i style="background:var(${s.color})"></i>${s.label}</span>`).join('')}</div>`;
+}
+
+function drawProj(I, SCH) {
+  const s = SCENARIOS[+$('projSel').value];
+  const m = model(s, I, SCH), b = m.b, R = m.rows, y1 = m.y1, L = m.last;
+  const hasAvoid = R[0].avoid > 0;
+  const grossPot = I.units.reduce((t, u) => t + u.cur, 0) * 12;
+  const breakEven = b.gross ? (I.exp + y1.pay) / b.gross : 0;
+  const firstPos = R.find(r => r.cf >= 0);
+  const payM1 = y1.pay / 12;
+  const rateChange = SCH.some(r => Math.abs(r.rate - I.rate) > 1e-9);
+
   $('projBody').innerHTML = `
+    <h3>Où va votre paiement hypothécaire ? (an 1, par mois)</h3>
     <div class="kpis">
-      <div class="kpi"><span>Valeur an 10</span><b>${cad(last.val)}</b></div>
-      <div class="kpi"><span>Équité an 10</span><b>${cad(last.eq)}</b></div>
-      <div class="kpi"><span>Cash-flow cumulé</span><b class="${cls(last.cum)}">${cad(last.cum)}</b></div>
-      <div class="kpi"><span>Gain total (avant impôt, vente)</span><b class="${cls(gain)}">${cad(gain)}</b></div>
-      <div class="kpi"><span>Multiple sur mise</span><b>${I.cash ? ((last.eq + last.cum) / I.cash).toFixed(2) + '×' : '—'}</b></div>
+      <div class="kpi"><span>Paiement à la banque</span><b>${cad(payM1)}</b></div>
+      <div class="kpi"><span>dont intérêts (coût)</span><b style="color:var(--neg)">${cad(y1.int / 12)}</b></div>
+      <div class="kpi"><span>dont capital (épargne)</span><b style="color:var(--pos)">${cad(y1.prin / 12)}</b></div>
+      <div class="kpi"><span>Part capital an 1 → an ${I.T}</span><b>${pct(y1.prin / y1.pay, 0)} → ${pct(L.prin / L.pay, 0)}</b></div>
     </div>
-    <div class="scroll" style="margin-top:12px"><table>
-      <thead><tr><th>An</th><th>Revenus nets</th><th>Dépenses</th><th>RNE</th><th>Service dette</th><th>Cash-flow</th><th>Valeur</th><th>Solde hyp.</th><th>Équité</th></tr></thead>
-      <tbody>${out.map(o => `<tr><td>${o.t}</td><td>${cad(o.egi)}</td><td>${cad(o.exp)}</td><td>${cad(o.noi)}</td><td>${cad(b.ds)}</td><td class="${cls(o.cf)}">${cad(o.cf)}</td><td>${cad(o.val)}</td><td>${cad(o.bal)}</td><td>${cad(o.eq)}</td></tr>`).join('')}</tbody>
+    <p class="note">Le paiement total (intérêts + capital) est le « service de la dette ». Seuls les intérêts sont de l'argent « perdu » ; le capital vous appartient (il augmente votre équité).${rateChange ? ' Le paiement change au renouvellement selon le nouveau taux.' : ''}</p>
+
+    <h3>Paiement hypothécaire par année : intérêts vs capital</h3>
+    ${stackChart(R, [{key: 'prin', label: 'Capital remboursé', color: '--c-cap'}, {key: 'int', label: 'Intérêts', color: '--c-int'}], 'Paiements hypothécaires annuels divisés en capital et intérêts')}
+
+    <h3>Création de valeur par année : cash-flow + capital + prise de valeur</h3>
+    ${stackChart(R, [{key: 'prin', label: 'Capital remboursé', color: '--c-cap'}, {key: 'cf', label: 'Cash-flow', color: '--c-cf'}, {key: 'appr', label: 'Prise de valeur', color: '--c-app'}, ...(hasAvoid ? [{key: 'avoid', label: 'Loyer évité', color: '--c-avoid'}] : [])], 'Création de valeur annuelle par composante')}
+
+    <div class="kpis" style="margin-top:12px">
+      <div class="kpi"><span>Création de valeur an 1</span><b class="${cls(y1.creation)}">${cad(y1.creation)}</b><span>${cad(y1.creation / 12)} /mois</span></div>
+      <div class="kpi"><span>Création cumulée ${I.T} ans</span><b class="${cls(L.cumCreation)}">${cad(L.cumCreation)}</b><span>${cad(L.cumCreation / (I.T * 12))} /mois en moyenne</span></div>
+      <div class="kpi"><span>TRI ${I.T} ans</span><b>${m.irr === null ? 'n/d' : pct(m.irr, 1)}</b><span>après frais de vente</span></div>
+      <div class="kpi"><span>Mise totale engagée</span><b>${cad(I.cash)}</b><span>×${I.cash ? ((m.netSale + L.cum) / I.cash).toFixed(2) : '—'} au retour</span></div>
+    </div>
+
+    <h3>Tableau détaillé</h3>
+    <div class="scroll"><table>
+      <thead><tr><th>An</th><th>Revenus nets</th><th>Dépenses</th><th>RNE</th><th>Paiement banque</th><th>dont intérêts</th><th>dont capital</th><th>Cash-flow</th><th>Prise de valeur</th>${hasAvoid ? '<th>Loyer évité</th>' : ''}<th>Création de valeur</th><th>… /mois</th><th>Rend. sur équité</th><th>Valeur</th><th>Solde hyp.</th><th>Équité</th><th>RCD</th><th>LTV</th></tr></thead>
+      <tbody>${R.map(o => `<tr><td>${o.t}</td><td>${cad(o.egi)}</td><td>${cad(o.exp)}</td><td>${cad(o.noi)}</td><td>${cad(o.pay)}</td><td>${cad(o.int)}</td><td>${cad(o.prin)}</td><td class="${cls(o.cf)}">${cad(o.cf)}</td><td>${cad(o.appr)}</td>${hasAvoid ? `<td>${cad(o.avoid)}</td>` : ''}<td class="${cls(o.creation)}"><b>${cad(o.creation)}</b></td><td>${cad(o.creation / 12)}</td><td>${pct(o.roe, 1)}</td><td>${cad(o.val)}</td><td>${cad(o.bal)}</td><td>${cad(o.eq)}</td><td>${o.dscr.toFixed(2)}</td><td>${pct(o.ltv, 0)}</td></tr>`).join('')}</tbody>
     </table></div>
-    <p class="note">Hypothèses : loyers +${pct(I.gRent, 1)}/an, dépenses +${pct(I.gExp, 1)}/an, valeur +${pct(I.gVal, 1)}/an, taux fixe constant (le service de dette ne change pas). Si les dépenses croissent plus vite que les loyers, le cash-flow s'érode : comparez avec la colonne « Dépenses ».</p>`;
+
+    <h3>Autres indicateurs du portrait économique</h3>
+    <div class="kpis">
+      <div class="kpi"><span>Taux de capitalisation</span><b>${pct(b.cap, 2)}</b></div>
+      <div class="kpi"><span>Multiplicateur de revenus brut</span><b>${grossPot ? (I.offer / grossPot).toFixed(1) : '—'}</b><span>prix ÷ loyers actuels</span></div>
+      <div class="kpi"><span>Prix par logement</span><b>${cad(I.offer / 3)}</b></div>
+      <div class="kpi"><span>Ratio de dépenses</span><b>${b.egi ? pct(I.exp / b.egi, 0) : '—'}</b><span>dépenses ÷ revenus nets</span></div>
+      <div class="kpi"><span>Point mort d'occupation</span><b>${pct(breakEven, 0)}</b><span>loyers requis pour payer dépenses + dette</span></div>
+      <div class="kpi"><span>RCD an 1</span><b>${y1.dscr.toFixed(2)}</b></div>
+      <div class="kpi"><span>Cash-flow positif dès</span><b>${firstPos ? 'an ' + firstPos.t : 'jamais (' + I.T + ' ans)'}</b></div>
+      <div class="kpi"><span>Équité an ${I.T}</span><b>${cad(L.eq)}</b><span>valeur ${cad(L.val)} − solde ${cad(L.bal)}</span></div>
+      <div class="kpi"><span>Net à la vente an ${I.T}</span><b>${cad(m.netSale)}</b><span>après ${pct(I.sell, 1)} de frais</span></div>
+      <div class="kpi"><span>Gain net total (avant impôt)</span><b class="${cls(m.gain)}">${cad(m.gain)}</b><span>net vente + cash-flows − mise</span></div>
+    </div>
+    <p class="note">Hypothèses : loyers +${pct(I.gRent, 1)}/an, dépenses +${pct(I.gExp, 1)}/an, valeur +${pct(I.gVal, 1)}/an, taux ${pct(I.rate, 2)} puis ${pct(I.rRate, 2)} au renouvellement (terme ${I.term} ans). Non inclus : impôt, déduction d'amortissement fiscal, gain en capital, gros travaux (toit, fenêtres, etc.) — prévoyez une réserve d'entretien.</p>`;
 }
 
 // ---------- événements
