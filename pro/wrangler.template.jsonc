@@ -8,6 +8,7 @@
     { "binding": "DB", "database_name": "pro", "database_id": "__DATABASE_ID__", "migrations_dir": "migrations" }
   ],
   "ai": { "binding": "AI" },
+  "version_metadata": { "binding": "VERSION" },
   "triggers": { "crons": ["* * * * *"] },
   "vars": { "CLAUDE_MODEL": "claude-opus-5-5", "AI_MONTHLY_CALLS": "1500", "CALDAV_URL": "https://caldav.icloud.com" }
 }

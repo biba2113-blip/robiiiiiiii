@@ -112,6 +112,9 @@ async function sheet(env, date, { fresh = false } = {}) {
     off: await offSummary(env, date),
     push: { ready: pushReady(env), public_key: env.VAPID_PUBLIC || null },
     mic: Boolean(env.AI),
+    // La version en ligne : l'app s'en sert pour se recharger seule après une mise à jour.
+    version: env.VERSION?.id || null,
+    version_at: env.VERSION?.timestamp || null,
     notif: {
       notif_start: settings.notif_start, notif_over: settings.notif_over, notif_due: settings.notif_due,
       notif_evening: settings.notif_evening, evening_min: settings.evening_min,

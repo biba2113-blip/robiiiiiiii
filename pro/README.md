@@ -73,6 +73,9 @@ git pull
 npm install && npm run deploy
 ```
 
+Après une mise à jour, Pro se recharge seule à sa prochaine ouverture, même installée sur l'écran d'accueil de l'iPhone.
+La date de la version en ligne est affichée dans ⚙, avec un bouton « Recharger Pro maintenant ».
+
 ## Le bouton micro
 
 Dans la boîte du bas : un tap pour parler, un second pour finir. Le texte part se faire classer et tu confirmes comme d'habitude.
@@ -142,7 +145,7 @@ npm test
 | `public/app.js`, `public/styles.css`, `public/sw.js` | L'écran, et la réception des notifications |
 | `migrations/` | Les tables |
 | `scripts/setup.mjs` | Installation sur Cloudflare |
-| `test/` | Tests de la logique, et deux parcours à l'écran (`parcours.e2e.cjs`, `micro.e2e.cjs`, demandent Playwright) |
+| `test/` | Tests de la logique, et trois parcours à l'écran (`parcours.e2e.cjs`, `micro.e2e.cjs`, `cocher.e2e.cjs`, demandent Playwright) |
 
 ## Ce qui a été vérifié, et ce qui ne l'a pas été
 
@@ -152,6 +155,7 @@ Vérifié :
 - La chaîne des notifications en local, de l'horloge jusqu'au message déchiffré par un faux appareil, sans doublon.
 - Le calendrier contre un serveur CalDAV d'essai (Radicale).
 - Le moment où on coche, sur iPhone simulé : case, trait, confettis, notes jouées, barre du jour, message, et la pluie quand la feuille est finie. Le son lui-même n'a pas été écouté.
+- La mise à jour automatique (simulée en changeant la version renvoyée par le serveur) et le réglage « Confettis et animations » sur un appareil qui réduit les animations.
 - Le bouton micro à l'écran, sur Mac et iPhone simulés, avec un faux micro : enregistrement, envoi de l'audio, confirmation, micro refusé, panne de transcription.
 
 Pas encore vérifié, faute d'accès :

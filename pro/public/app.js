@@ -79,6 +79,11 @@ async function load(date = S.date, opts = {}) {
   if (opts.fresh) q.set('fresh', '1');
   const data = await guard(() => api('sheet?' + q));
   if (!data) return;
+  // Une nouvelle version a été mise en ligne depuis que cette page est ouverte : on la charge, sans rien te faire perdre.
+  if (data.version) {
+    S.version ??= data.version;
+    if (data.version !== S.version && canReload()) return location.reload();
+  }
   S.data = data;
   S.date = data.date;
   render();
@@ -87,6 +92,9 @@ async function load(date = S.date, opts = {}) {
     openTriage(data.triage, { to: data.today, title: 'Ce qui restait des autres jours' });
   }
 }
+
+/** Recharger sans rien casser : pas de fenêtre ouverte, pas de texte en attente, pas d'enregistrement ni de glissement. */
+const canReload = () => !modalRoot.firstChild && !$('#capture-text')?.value.trim() && mic.state === 'idle' && !drag && !S.busy;
 
 // ---- La feuille ----
 
@@ -945,6 +953,10 @@ async function openSettings() {
   const m = openModal(
     `<h2>Réglages</h2>
 
+     <h3>Version</h3>
+     <p>${d.version_at ? `Mise en ligne ${esc(new Intl.DateTimeFormat('fr-CA', { weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' }).format(new Date(d.version_at)))}.` : 'Copie locale.'} Pro se recharge seule après une mise à jour.</p>
+     <button class="btn ghost" data-do="reload">Recharger Pro maintenant</button>
+
      <h3>Claude, pour comprendre ta dictée</h3>
      <p>${d.ai ? 'Une clé Claude est enregistrée.' : "Aucune clé Claude n'est enregistrée : tes phrases sont seulement découpées, pas analysées."}</p>
      <button class="btn ghost" data-do="ai-check">Tester Claude</button>
@@ -952,6 +964,8 @@ async function openSettings() {
 
      <h3>Quand je coche une tâche</h3>
      <label class="check"><input type="checkbox" id="s-sound" ${soundOn() ? 'checked' : ''}><span>Jouer un son (sur cet appareil)</span></label>
+     <label class="check"><input type="checkbox" id="s-anim" ${calm() ? '' : 'checked'}><span>Confettis et animations (sur cet appareil)</span></label>
+     ${deviceCalm() ? `<p class="hint">Cet appareil est réglé sur « Réduire les animations ». Coche la case pour les voir quand même dans Pro.</p>` : ''}
 
      <h3>Notifications</h3>
      <div id="push-box"><p class="hint">Vérification…</p></div>
@@ -1012,6 +1026,15 @@ async function openSettings() {
   };
   drawPush();
   drawRec();
+  $('#s-anim', m).addEventListener('change', (e) => {
+    try {
+      localStorage.setItem('pro_anim', e.target.checked ? '1' : '0');
+    } catch {
+      // stockage refusé : Pro continue de suivre le réglage de l'appareil
+    }
+    applyCalm();
+    if (e.target.checked) celebrate(e.target, 40);
+  });
   $('#s-sound', m).addEventListener('change', (e) => {
     try {
       localStorage.setItem('pro_son', e.target.checked ? '1' : '0');
@@ -1036,6 +1059,8 @@ async function openSettings() {
     } else if (act === 'push-off') {
       await guard(disablePush);
       drawPush();
+    } else if (act === 'reload') {
+      location.reload();
     } else if (act === 'ai-check') {
       const btn = e.target.closest('[data-do]');
       btn.disabled = true;
@@ -1098,7 +1123,22 @@ async function openSettings() {
 
 // ---- Cocher ----
 
-const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Confettis et animations : par défaut Pro suit le réglage de l'appareil (« Réduire les animations »).
+// Le choix fait dans ⚙ passe devant, appareil par appareil.
+const deviceCalm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const animPref = () => {
+  try {
+    return localStorage.getItem('pro_anim');
+  } catch {
+    return null;
+  }
+};
+const calm = () => {
+  const p = animPref();
+  return p === '0' || (p == null && deviceCalm());
+};
+const applyCalm = () => document.documentElement.classList.toggle('calm', calm());
+applyCalm();
 const CONFETTI_COLORS = ['var(--robiii)', 'var(--immo)', 'var(--perso)', 'var(--accent)', 'var(--sun)', 'var(--good)'];
 
 /** Des confettis qui jaillissent de la case cochée. */

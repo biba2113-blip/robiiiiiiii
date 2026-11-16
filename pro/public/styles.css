@@ -250,9 +250,8 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
   #app { padding-bottom: 130px; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  * { animation: none !important; transition: none !important; }
-}
+/* Animations coupées : réglage de l'appareil ou choix fait dans les réglages de Pro (classe posée par app.js). */
+html.calm * { animation: none !important; transition: none !important; }
 
 /* ---- Étapes 2 et 3 ---- */
 /* La barre « En cours » */
