@@ -23,3 +23,7 @@ if (check && id === LOCAL) {
 }
 const template = readFileSync(path.join(root, 'wrangler.template.jsonc'), 'utf8');
 writeFileSync(target, template.replace('__DATABASE_ID__', id));
+
+// En local, l'app s'ouvre avec la clé « dev ». Le fichier reste hors du dépôt.
+const devVars = path.join(root, '.dev.vars');
+if (!existsSync(devVars)) writeFileSync(devVars, 'ACCESS_KEY=dev\n');

@@ -76,7 +76,8 @@ npm run migrate:local
 npm run dev
 ```
 
-L'app locale s'ouvre sur `http://localhost:8790/k/dev/`. Les secrets locaux vont dans `.dev.vars` (hors du dépôt).
+L'app locale s'ouvre sur `http://localhost:8790/` (elle mène à `/k/dev/`). Les secrets locaux vont dans `.dev.vars` (hors du dépôt), créé tout seul avec la clé `dev`.
+En ligne, sans `ACCESS_KEY`, Pro ne sert rien du tout.
 
 ```bash
 npm test

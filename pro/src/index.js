@@ -368,8 +368,12 @@ function manifest() {
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
+    // Sans clé d'accès configurée, rien n'est servi : l'app n'est jamais ouverte par défaut.
+    if (!env.ACCESS_KEY) return new Response('Pro n’est pas encore configurée.', { status: 503 });
+    // En développement local seulement (clé « dev »), la racine mène à l'app.
+    if (env.ACCESS_KEY === 'dev' && url.pathname === '/') return Response.redirect(url.origin + '/k/dev/', 302);
     const m = url.pathname.match(/^\/k\/([^/]+)(\/.*)?$/);
-    if (!m || !sameKey(m[1], env.ACCESS_KEY || 'dev')) return notFound();
+    if (!m || !sameKey(m[1], env.ACCESS_KEY)) return notFound();
     if (m[2] === undefined) return Response.redirect(url.origin + url.pathname + '/', 301);
     const rest = m[2].slice(1);
 
