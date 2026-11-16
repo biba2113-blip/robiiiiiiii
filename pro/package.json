@@ -1,0 +1,20 @@
+{
+  "name": "pro",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/config.mjs && wrangler dev --port 8790",
+    "test": "node --test \"test/*.test.mjs\"",
+    "migrate:local": "node scripts/config.mjs && wrangler d1 migrations apply pro --local",
+    "setup": "node scripts/setup.mjs",
+    "deploy": "node scripts/config.mjs --check && wrangler d1 migrations apply pro --remote && wrangler deploy"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
+    "zod": "^4.6.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.162.0"
+  }
+}

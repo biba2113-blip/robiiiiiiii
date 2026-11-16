@@ -1,0 +1,11 @@
+{
+  "name": "pro",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "pro", "database_id": "__DATABASE_ID__", "migrations_dir": "migrations" }
+  ],
+  "vars": { "CLAUDE_MODEL": "claude-opus-5-5", "AI_MONTHLY_CALLS": "1500", "CALDAV_URL": "https://caldav.icloud.com" }
+}
