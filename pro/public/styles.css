@@ -48,8 +48,14 @@ small { display: block; color: var(--muted); font-size: 0.8rem; font-weight: 400
 .pill { border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 8px 14px; font-weight: 600; font-size: 0.9rem; white-space: nowrap; }
 .pill.strong { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .prog { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; font-size: 0.86rem; color: var(--muted); }
-.prog-bar { flex: 1; height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
-.prog-bar i { display: block; height: 100%; border-radius: 99px; background: var(--accent); transition: width 0.5s ease; }
+.prog-bar { flex: 1; height: 10px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.prog-bar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--accent), var(--good)); transition: width 0.7s cubic-bezier(0.3, 1.5, 0.5, 1); }
+.prog.full .prog-bar i { background: var(--good); }
+.prog.full > span { color: var(--good); font-weight: 700; }
+.prog.bump > span { animation: bump 0.6s cubic-bezier(0.3, 1.6, 0.5, 1); color: var(--ink); font-weight: 700; }
+.prog.bump .prog-bar { animation: glow 0.9s ease; }
+@keyframes bump { 40% { transform: scale(1.18); } }
+@keyframes glow { 30% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--good) 30%, transparent); } }
 .sub { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: space-between; font-size: 0.86rem; color: var(--muted); }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
@@ -89,9 +95,19 @@ small { display: block; color: var(--muted); font-size: 0.8rem; font-weight: 400
 .num { font-family: var(--display); font-weight: 700; color: var(--accent); width: 1em; flex: none; margin-top: 1px; }
 .cb { width: 22px; height: 22px; border-radius: 7px; border: 2px solid var(--line); background: none; flex: none; margin-top: 1px; padding: 0; position: relative; transition: background 0.2s, border-color 0.2s, transform 0.2s; }
 .cb:hover { border-color: var(--muted); }
-.cb.on { background: var(--muted); border-color: var(--muted); }
+.cb.on { background: var(--good); border-color: var(--good); }
 .cb.on::after { content: ""; position: absolute; left: 6px; top: 2px; width: 5px; height: 10px; border: solid var(--surface); border-width: 0 2.5px 2.5px 0; transform: rotate(45deg); }
-.row.checking .cb { transform: scale(1.15); }
+.row.done .cb.on { opacity: 0.75; }
+/* Le moment où tu coches : la case rebondit, un anneau s'ouvre, la ligne s'allume puis se raye. */
+.row.checking { animation: rowflash 0.95s ease; border-radius: 10px; }
+.row.checking .cb { animation: cbpop 0.5s cubic-bezier(0.3, 1.7, 0.5, 1); }
+.row.checking .cb::after { animation: tick 0.32s 0.08s cubic-bezier(0.3, 1.7, 0.5, 1) backwards; }
+.row.checking .cb::before { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid var(--good); animation: ring 0.65s ease-out forwards; pointer-events: none; }
+.row.checking .tt { background-image: linear-gradient(var(--good), var(--good)); background-size: 100% 3px; }
+@keyframes cbpop { 0% { transform: scale(0.8); } 45% { transform: scale(1.4); } 100% { transform: scale(1); } }
+@keyframes tick { from { transform: rotate(45deg) scale(0); opacity: 0; } }
+@keyframes ring { from { transform: scale(0.6); opacity: 0.9; } to { transform: scale(2.8); opacity: 0; } }
+@keyframes rowflash { 0%, 55% { background-color: color-mix(in srgb, var(--good) 14%, transparent); box-shadow: 0 0 0 8px color-mix(in srgb, var(--good) 14%, transparent); } 100% { background-color: transparent; box-shadow: 0 0 0 8px transparent; } }
 .grip { color: var(--line); font-size: 1.1rem; line-height: 1; padding: 4px 2px; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
 .grip:hover { color: var(--muted); }
 .row.dragging { opacity: 0.35; }
@@ -207,6 +223,8 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
 #toast.on { opacity: 1; transform: translate(-50%, 0); }
 
 .confetti { position: fixed; z-index: 80; width: 8px; height: 8px; border-radius: 2px; pointer-events: none; animation: pop 1s cubic-bezier(0.2, 0.7, 0.3, 1) forwards; }
+.confetti.fall { animation-name: fall; animation-timing-function: cubic-bezier(0.3, 0.4, 0.6, 1); }
+@keyframes fall { to { transform: translate(var(--drift), 105vh) rotate(var(--rot)); opacity: 0.9; } }
 @keyframes pop { to { transform: translate(var(--dx), calc(var(--dy) + 90px)) rotate(var(--rot)); opacity: 0; } }
 
 /* Mac et grands écrans : la fenêtre se centre */

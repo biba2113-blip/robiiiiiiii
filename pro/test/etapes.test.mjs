@@ -90,3 +90,13 @@ test('un appel qui suit un autre est écrit au calendrier sans alerte', () => {
   assert.ok(icsFor(t, 'pro-3').includes('BEGIN:VALARM'));
   assert.ok(!icsFor(t, 'pro-3', { alarm: false }).includes('BEGIN:VALARM'));
 });
+
+test('le message après avoir coché suit ce qui vient d’être fait', async () => {
+  const { cheerFor } = await import('../public/cheer.js');
+  assert.equal(cheerFor({ section: 'faire' }, { done: 8, total: 8 }), 'Feuille terminée. Bravo !');
+  assert.equal(cheerFor({ section: 'priorite' }, { done: 2, total: 9 }), 'Priorité réglée. 2 sur 9.');
+  assert.equal(cheerFor({ section: 'rappel' }, { done: 4, total: 8 }), 'Appel fait. La moitié est faite.');
+  assert.equal(cheerFor({ section: 'faire' }, { done: 7, total: 8, avoided: true }), 'Tu la repoussais, c’est fait. Plus qu’une.');
+  assert.equal(cheerFor({ section: 'faire' }, { done: 6, total: 8, pick: 0 }), 'Une de moins. Plus que 2.');
+  assert.equal(cheerFor({ section: 'faire' }, { done: 1, total: 9, pick: 0.999 }), 'Réglé. 1 sur 9.');
+});

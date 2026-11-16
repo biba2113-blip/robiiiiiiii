@@ -1,6 +1,6 @@
 // Petit service worker : la coquille de l'app reste ouvrable hors ligne. Les données ne sont jamais mises en cache.
-const CACHE = 'pro-v3';
-const SHELL = ['./', 'app.js', 'plan.js', 'styles.css'];
+const CACHE = 'pro-v4';
+const SHELL = ['./', 'app.js', 'plan.js', 'cheer.js', 'styles.css'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

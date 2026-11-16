@@ -1,5 +1,6 @@
 // Pro : l'écran. Une feuille du jour, une boîte pour vider ta tête, un tri le soir.
 import { freeWindows, sortTasks, fmtTime, fmtDur, daysBetween } from './plan.js';
+import { cheerFor } from './cheer.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const app = $('#app');
@@ -291,7 +292,7 @@ function render() {
         <button class="icon" data-act="settings" aria-label="Réglages">⚙</button>
       </div>
       ${nowbar}
-      <div class="prog"><div class="prog-bar"><i style="width:${pct}%"></i></div><span>${total ? `${done} sur ${total} faite${done > 1 ? 's' : ''}` : 'Feuille vide'}</span></div>
+      <div class="prog${total && done === total ? ' full' : ''}"><div class="prog-bar"><i style="width:${pct}%"></i></div><span>${total ? `${done} sur ${total} faite${done > 1 ? 's' : ''}` : 'Feuille vide'}</span></div>
       <div class="sub"><span class="load">${load}</span>${off}
         <span class="legend"><span><i class="dot c-robiii"></i>Robiii</span><span><i class="dot c-immo"></i>ImmoMulti</span><span><i class="dot c-perso"></i>Perso</span></span>
       </div>
@@ -949,6 +950,9 @@ async function openSettings() {
      <button class="btn ghost" data-do="ai-check">Tester Claude</button>
      <div id="ai-box"></div>
 
+     <h3>Quand je coche une tâche</h3>
+     <label class="check"><input type="checkbox" id="s-sound" ${soundOn() ? 'checked' : ''}><span>Jouer un son (sur cet appareil)</span></label>
+
      <h3>Notifications</h3>
      <div id="push-box"><p class="hint">Vérification…</p></div>
      ${tick('n-start', "À l'heure prévue d'une tâche ou d'un bloc d'appels", n.notif_start)}
@@ -1008,6 +1012,14 @@ async function openSettings() {
   };
   drawPush();
   drawRec();
+  $('#s-sound', m).addEventListener('change', (e) => {
+    try {
+      localStorage.setItem('pro_son', e.target.checked ? '1' : '0');
+    } catch {
+      // stockage refusé : le son reste activé
+    }
+    chime('task');
+  });
 
   m.addEventListener('click', async (e) => {
     const act = e.target.closest('[data-do]')?.dataset.do;
@@ -1086,18 +1098,74 @@ async function openSettings() {
 
 // ---- Cocher ----
 
-function celebrate(el) {
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const CONFETTI_COLORS = ['var(--robiii)', 'var(--immo)', 'var(--perso)', 'var(--accent)', 'var(--sun)', 'var(--good)'];
+
+/** Des confettis qui jaillissent de la case cochée. */
+function celebrate(el, count = 26) {
+  if (calm()) return;
   const r = el.getBoundingClientRect();
-  const colors = ['var(--robiii)', 'var(--immo)', 'var(--perso)', 'var(--accent)', 'var(--sun)'];
-  for (let i = 0; i < 26; i++) {
+  const big = count > 20;
+  for (let i = 0; i < count; i++) {
     const p = document.createElement('i');
     p.className = 'confetti';
-    const a = (Math.PI * 2 * i) / 26 + Math.random() * 0.4;
-    const dist = 60 + Math.random() * 90;
-    p.style.cssText = `left:${r.left + 12}px;top:${r.top + 12}px;background:${colors[i % 5]};--dx:${Math.cos(a) * dist}px;--dy:${Math.sin(a) * dist - 40}px;--rot:${Math.random() * 540 - 270}deg`;
+    const a = (Math.PI * 2 * i) / count + Math.random() * 0.4;
+    const dist = (big ? 70 : 34) + Math.random() * (big ? 120 : 46);
+    p.style.cssText = `left:${r.left + r.width / 2 - 4}px;top:${r.top + r.height / 2 - 4}px;background:${CONFETTI_COLORS[i % 6]};--dx:${Math.cos(a) * dist}px;--dy:${Math.sin(a) * dist - (big ? 40 : 14)}px;--rot:${Math.random() * 540 - 270}deg`;
+    if (!big) p.style.animationDuration = '0.7s';
     document.body.append(p);
     setTimeout(() => p.remove(), 1100);
+  }
+}
+
+/** La feuille est finie : une pluie de confettis sur tout l'écran. */
+function shower() {
+  if (calm()) return;
+  for (let i = 0; i < 90; i++) {
+    const p = document.createElement('i');
+    p.className = 'confetti fall';
+    const size = 6 + Math.random() * 6;
+    p.style.cssText = `left:${Math.random() * 100}vw;top:-16px;width:${size}px;height:${size * (Math.random() > 0.5 ? 1 : 0.45)}px;background:${CONFETTI_COLORS[i % 6]};--drift:${Math.random() * 160 - 80}px;--rot:${Math.random() * 900 - 450}deg;animation-duration:${1.5 + Math.random() * 1.3}s;animation-delay:${Math.random() * 0.5}s`;
+    document.body.append(p);
+    setTimeout(() => p.remove(), 3500);
+  }
+}
+
+// Le son : quelques notes fabriquées sur place, sans fichier. Réglable par appareil, dans ⚙.
+const soundOn = () => {
+  try {
+    return localStorage.getItem('pro_son') !== '0';
+  } catch {
+    return true;
+  }
+};
+let audio = null;
+const CHIMES = {
+  task: [[659.25, 0], [987.77, 0.075]], // deux notes qui montent
+  big: [[523.25, 0], [659.25, 0.07], [783.99, 0.14], [1046.5, 0.21]], // une priorité : un accord qui grimpe
+  day: [[523.25, 0], [659.25, 0.09], [783.99, 0.18], [1046.5, 0.27], [1318.5, 0.4], [1568, 0.52]], // la feuille est finie
+};
+function chime(kind = 'task') {
+  if (!soundOn()) return;
+  try {
+    audio ||= new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === 'suspended') audio.resume();
+    const t0 = audio.currentTime + 0.01;
+    for (const [freq, at] of CHIMES[kind]) {
+      const osc = audio.createOscillator();
+      const gain = audio.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const long = kind === 'task' ? 0.28 : 0.5;
+      gain.gain.setValueAtTime(0.0001, t0 + at);
+      gain.gain.exponentialRampToValueAtTime(0.16, t0 + at + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + at + long);
+      osc.connect(gain).connect(audio.destination);
+      osc.start(t0 + at);
+      osc.stop(t0 + at + long + 0.05);
+    }
+  } catch {
+    // pas de son sur cet appareil : le reste de la récompense suffit
   }
 }
 
@@ -1106,13 +1174,32 @@ async function toggleCheck(id, rowEl) {
   if (!t) return;
   const toDone = t.status !== 'done';
   if (toDone) {
+    const tasks = S.data.tasks;
+    const total = tasks.length;
+    const done = tasks.filter((x) => x.status === 'done').length + 1;
+    const avoided = isAvoided(t);
+    const big = t.section === 'priorite' || avoided;
+    const last = done === total;
+    const cb = $('.cb', rowEl);
     rowEl.classList.add('checking');
-    $('.cb', rowEl).classList.add('on');
-    navigator.vibrate?.(toDone && (t.section === 'priorite' || isAvoided(t)) ? [18, 40, 28] : 12);
-    if (t.section === 'priorite' || isAvoided(t)) celebrate($('.cb', rowEl));
+    cb.classList.add('on');
+    navigator.vibrate?.(last ? [20, 50, 20, 50, 40] : big ? [18, 40, 28] : 12);
+    chime(last ? 'day' : big ? 'big' : 'task');
+    celebrate(cb, big || last ? 40 : 12);
+    if (last) shower();
+    // La barre du jour avance tout de suite, sous tes yeux.
+    const bar = $('.prog-bar i');
+    if (bar) bar.style.width = `${Math.round((done / total) * 100)}%`;
+    const prog = $('.prog');
+    if (prog) {
+      prog.classList.add('bump');
+      prog.classList.toggle('full', last);
+      $('span', prog).textContent = `${done} sur ${total} faite${done > 1 ? 's' : ''}`;
+    }
+    toast(cheerFor(t, { done, total, avoided }), last ? 4200 : 2400);
   }
   const saved = api(`tasks/${id}`, { method: 'PATCH', body: { status: toDone ? 'done' : 'todo' } });
-  await Promise.all([guard(() => saved), new Promise((r) => setTimeout(r, toDone ? 520 : 0))]);
+  await Promise.all([guard(() => saved), new Promise((r) => setTimeout(r, toDone ? 950 : 0))]);
   load();
 }
 

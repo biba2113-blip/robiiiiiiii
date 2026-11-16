@@ -147,10 +147,11 @@ npm test
 ## Ce qui a été vérifié, et ce qui ne l'a pas été
 
 Vérifié :
-- 42 tests de logique, dont le chiffrement des notifications contre le vecteur officiel de la RFC 8291.
+- 43 tests de logique, dont le chiffrement des notifications contre le vecteur officiel de la RFC 8291.
 - Le parcours complet à l'écran, sur Mac et iPhone simulés : dictée, confirmation, cocher, glisser, chrono, imprévu, mode appels, bilan, tri du soir, réserve, ce qui revient.
 - La chaîne des notifications en local, de l'horloge jusqu'au message déchiffré par un faux appareil, sans doublon.
 - Le calendrier contre un serveur CalDAV d'essai (Radicale).
+- Le moment où on coche, sur iPhone simulé : case, trait, confettis, notes jouées, barre du jour, message, et la pluie quand la feuille est finie. Le son lui-même n'a pas été écouté.
 - Le bouton micro à l'écran, sur Mac et iPhone simulés, avec un faux micro : enregistrement, envoi de l'audio, confirmation, micro refusé, panne de transcription.
 
 Pas encore vérifié, faute d'accès :
