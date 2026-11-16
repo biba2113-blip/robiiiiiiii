@@ -43,6 +43,7 @@ Comment découper :
 - Quand il résume un gros morceau en une phrase (« faut que je règle le financement du six-logements »), garde une seule tâche au titre clair, et mets dans sa note les deux ou trois étapes concrètes qu'il a mentionnées ou qui s'imposent d'évidence. Sa feuille déborde vite : n'ajoute pas de tâches pour des étapes qu'il n'a pas dites.
 - Ce qui n'est pas une action (une réflexion, une plainte, une explication) ne devient pas une tâche. Si ça éclaire une tâche, mets-le dans sa note ; sinon laisse-le tomber.
 - S'il se reprend ou se répète, garde sa dernière version, une seule fois.
+- Il dicte souvent en style télégraphique, une tâche par phrase, avec sa durée à la fin. La transcription met alors une virgule entre chaque mot : ne coupe pas à ces virgules. « Faire, offre, 4 logements, Saint-Jérôme, 30 minutes environ. Expédié, commande, 15 minutes. » donne deux tâches : « Faire l'offre pour le 4 logements à Saint-Jérôme » (30 minutes) et « Expédier la commande » (15 minutes). Complète les petits mots qui manquent pour que le titre se lise bien, et écris « / » quand il dit « slash ».
 
 Aujourd'hui : ${DAY_NAMES[dow(today)]} ${today}. Les prochains jours : ${week}.
 
@@ -54,7 +55,7 @@ Pour chaque tâche :
 - nature : « obligation » (argent à payer, taxes, paies, comptabilité, légal, renouvellements) ; « attend » (quelqu'un attend après lui) ; « avance » (fait avancer une vente, un financement, une acquisition) ; « autre ».
 - day : le jour où la faire, AAAA-MM-JJ. S'il ne dit rien, mets ${defaultDay}. « un jour », « éventuellement », « quand j'aurai le temps » donnent null.
 - due_date : seulement s'il donne une vraie date limite (« avant vendredi », « pour le 30 »), AAAA-MM-JJ. Sinon null.
-- est_minutes : ton estimation réaliste, parmi 5, 10, 15, 30, 45, 60, 90, 120. Un appel vaut 10.
+- est_minutes : la durée qu'il dit quand il en dit une (« 30 minutes environ », « une heure » donne 60). Sinon ton estimation réaliste, parmi 5, 10, 15, 30, 45, 60, 90, 120 ; un appel vaut 10.
 - contact : le nom de la personne ou de l'entreprise à joindre pour un rappel, sinon null.
 - phone : le numéro de téléphone s'il le dicte, en chiffres, sinon null.`;
 }
@@ -76,7 +77,7 @@ async function underCap(env) {
 }
 
 async function ask(env, system, user, schema) {
-  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, timeout: 20_000, maxRetries: 0 });
+  const client = new Anthropic({ apiKey: String(env.ANTHROPIC_API_KEY).trim(), timeout: 20_000, maxRetries: 0 });
   const response = await client.beta.messages.parse({
     model: env.CLAUDE_MODEL || DEFAULT_MODEL,
     max_tokens: 16000,
@@ -116,6 +117,31 @@ export function sanitize(t, { today, defaultDay }) {
   };
 }
 
+/** Pourquoi un appel à Claude a échoué, en quelques mots. */
+export function whyFailed(err) {
+  if (err instanceof Anthropic.AuthenticationError) return 'clé Claude refusée';
+  if (err instanceof Anthropic.RateLimitError) return 'limite Claude atteinte';
+  if (err instanceof Anthropic.APIConnectionError) return 'Claude injoignable';
+  if (err instanceof Anthropic.APIError) return `erreur Claude ${err.status}`;
+  return String(err.message || err);
+}
+
+const KEY_HELP =
+  'Il faut une clé API créée dans console.anthropic.com (elle commence par sk-ant-api), sur un compte qui a des crédits. Un abonnement claude.ai ne donne pas de clé API. Pour la poser, sur ton Mac, dans le dossier pro : npx wrangler secret put ANTHROPIC_API_KEY';
+
+/** Essaie Claude pour vrai, avec une dictée d'une ligne. Rend { ok, model } ou { ok: false, why, help? }. */
+export async function checkClaude(env, ctx) {
+  if (!env.ANTHROPIC_API_KEY) return { ok: false, why: 'Aucune clé Claude n’est enregistrée.', help: KEY_HELP };
+  try {
+    const out = await ask(env, systemPrompt(ctx), 'Rappeler Marc pour la soumission, 10 minutes.', TaskList);
+    return { ok: true, model: env.CLAUDE_MODEL || DEFAULT_MODEL, title: out.tasks[0]?.title || null };
+  } catch (err) {
+    const auth = err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError;
+    const detail = err instanceof Anthropic.APIError && !auth ? ` : ${String(err.message || '').replace(/\s+/g, ' ').slice(0, 180)}` : '';
+    return { ok: false, why: `${auth ? 'La clé Claude est refusée par Anthropic.' : `Claude n’a pas répondu (${whyFailed(err)}${detail}).`}`, help: auth ? KEY_HELP : null };
+  }
+}
+
 /** Texte dicté → { engine: 'claude' | 'regles', items, note? }. */
 export async function parseDump(env, text, ctx) {
   const clean = (list) => list.map((t) => sanitize(t, ctx)).filter(Boolean);
@@ -125,17 +151,7 @@ export async function parseDump(env, text, ctx) {
       const items = clean(out.tasks);
       if (items.length) return { engine: 'claude', items };
     } catch (err) {
-      const why =
-        err instanceof Anthropic.AuthenticationError
-          ? 'clé Claude refusée'
-          : err instanceof Anthropic.RateLimitError
-            ? 'limite Claude atteinte'
-            : err instanceof Anthropic.APIConnectionError
-              ? 'Claude injoignable'
-              : err instanceof Anthropic.APIError
-                ? `erreur Claude ${err.status}`
-                : String(err.message || err);
-      return { engine: 'regles', items: clean(parseWithRules(text, ctx)), note: why };
+      return { engine: 'regles', items: clean(parseWithRules(text, ctx)), note: whyFailed(err) };
     }
   }
   return { engine: 'regles', items: clean(parseWithRules(text, ctx)) };

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseWithRules, nextWeekday, unspoken } from '../src/rules.js';
+import { parseWithRules, nextWeekday, unspoken, takeDuration } from '../src/rules.js';
 import { sanitize } from '../src/parse.js';
 import { toLocal, toUtc, addDays, dow } from '../src/time.js';
 
@@ -72,4 +72,34 @@ test('la note passe le nettoyage, bornée à 160 caractères', () => {
   assert.equal(sanitize({ title: 'x', note: '  Chauffage   en panne\nau 2 ' }, CTX).note, 'Chauffage en panne au 2');
   assert.equal(sanitize({ title: 'x', note: 'a'.repeat(300) }, CTX).note.length, 160);
   assert.equal(sanitize({ title: 'x', note: '   ' }, CTX).note, null);
+});
+
+test('la durée dite en fin de tâche est comprise', () => {
+  assert.deepEqual(takeDuration('Faire offre 4 logements, 30 minutes environ'), { text: 'Faire offre 4 logements', minutes: 30 });
+  assert.deepEqual(takeDuration('15 minutes'), { text: '', minutes: 15 });
+  assert.deepEqual(takeDuration('Fermer le mois environ 1 heure et demie'), { text: 'Fermer le mois', minutes: 90 });
+  assert.deepEqual(takeDuration('Compta une heure'), { text: 'Compta', minutes: 60 });
+  assert.deepEqual(takeDuration('Ménage du bureau demi-heure'), { text: 'Ménage du bureau', minutes: 30 });
+  // une heure du jour n'est pas une durée
+  assert.deepEqual(takeDuration('Appeler Marc avant 3 heures'), { text: 'Appeler Marc avant 3 heures', minutes: null });
+  assert.deepEqual(takeDuration('Payer les 15 minutes de stationnement demain'), { text: 'Payer les 15 minutes de stationnement demain', minutes: null });
+});
+
+test('une dictée télégraphique, avec une virgule entre chaque mot, donne une tâche par phrase', () => {
+  const items = parseWithRules(
+    'Faire, offre, 4 logements, Saint-Jérôme, 30 minutes environ. Expédié, commande, 15 minutes. Note de crédit, librairie moderne, 15 minutes. Retour, slash, crédit.',
+    CTX,
+  );
+  assert.deepEqual(items.map((i) => [i.title, i.est_minutes, i.company]), [
+    ['Faire offre 4 logements Saint-Jérôme', 30, 'immo'],
+    ['Expédié commande', 15, 'robiii'],
+    ['Note de crédit librairie moderne', 15, 'robiii'],
+    ['Retour/crédit', 30, 'perso'],
+  ]);
+});
+
+test('les vraies listes à virgules restent séparées, chacune avec sa durée', () => {
+  const items = parseWithRules('Rappeler Marc 10 minutes, payer le plombier 20 minutes, épicerie', CTX);
+  assert.deepEqual(items.map((i) => [i.title, i.est_minutes]), [['Rappeler Marc', 10], ['Payer le plombier', 20], ['Épicerie', 30]]);
+  assert.equal(parseWithRules('1. appeler Marc\n2) 4 logements à visiter', CTX)[1].title, '4 logements à visiter');
 });

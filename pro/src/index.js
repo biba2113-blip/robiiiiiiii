@@ -1,7 +1,7 @@
 // Pro : le serveur. Tout vit sous le lien privé /k/<clé>/ ; sans la clé, 404.
 import { place, DEFAULTS } from '../public/plan.js';
 import { toLocal, addDays, dow, nowIso } from './time.js';
-import { parseDump, firstStep, sanitize } from './parse.js';
+import { parseDump, firstStep, sanitize, checkClaude } from './parse.js';
 import { configured, eventsFor, syncTasks, listCalendars } from './caldav.js';
 import { current, focus, stop, imprevu, onTaskClosed, minutesFor } from './track.js';
 import { runNotifications, NOTIF_DEFAULTS } from './notify.js';
@@ -284,6 +284,9 @@ async function api(req, env, ctx, path, url) {
     await run(env, 'UPDATE captures SET parsed_json = ?, engine = ? WHERE id = ?', JSON.stringify(out.items), out.engine, captureId);
     return json({ capture_id: captureId, ...out });
   }
+
+  // Essayer Claude pour vrai, depuis les réglages.
+  if (path === 'ai/check' && m === 'POST') return json(await checkClaude(env, { today, defaultDay: today }));
 
   if (path === 'tasks' && m === 'POST') {
     if (!Array.isArray(body.items) || !body.items.length) return bad('Aucune tâche');

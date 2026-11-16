@@ -99,6 +99,9 @@ Assigne le raccourci au bouton Action ou dis « Dis Siri » suivi de son nom. La
 - Claude analyse ce que tu dictes : il sort les actions, leur donne un titre court et garde le contexte dans une note.
   Sans clé Claude, des règles simples découpent seulement tes phrases, et la confirmation l'indique en rouge.
   Pour brancher la clé : `npx wrangler secret put ANTHROPIC_API_KEY` dans ce dossier (la clé se tape dans le Terminal, jamais ailleurs).
+  Il faut une clé API créée dans console.anthropic.com, sur un compte qui a des crédits ; un abonnement claude.ai n'en fournit pas.
+  Dans Pro, ⚙ puis « Tester Claude » fait un vrai essai et dit pourquoi ça échoue.
+- Les règles de secours comprennent le style télégraphique (« Faire, offre, 4 logements, 30 minutes environ. » : une tâche de 30 minutes) et les durées dictées.
 
 - Le modèle est réglé dans `wrangler.template.jsonc` (`CLAUDE_MODEL`, par défaut `claude-opus-5-5`).
   Une dictée coûte de l'ordre de quelques cents. Pour réduire beaucoup la facture, mets `claude-haiku-5-5` et relance `npm run deploy`.
@@ -144,7 +147,7 @@ npm test
 ## Ce qui a été vérifié, et ce qui ne l'a pas été
 
 Vérifié :
-- 39 tests de logique, dont le chiffrement des notifications contre le vecteur officiel de la RFC 8291.
+- 42 tests de logique, dont le chiffrement des notifications contre le vecteur officiel de la RFC 8291.
 - Le parcours complet à l'écran, sur Mac et iPhone simulés : dictée, confirmation, cocher, glisser, chrono, imprévu, mode appels, bilan, tri du soir, réserve, ce qui revient.
 - La chaîne des notifications en local, de l'horloge jusqu'au message déchiffré par un faux appareil, sans doublon.
 - Le calendrier contre un serveur CalDAV d'essai (Radicale).

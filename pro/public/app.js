@@ -944,6 +944,11 @@ async function openSettings() {
   const m = openModal(
     `<h2>Réglages</h2>
 
+     <h3>Claude, pour comprendre ta dictée</h3>
+     <p>${d.ai ? 'Une clé Claude est enregistrée.' : "Aucune clé Claude n'est enregistrée : tes phrases sont seulement découpées, pas analysées."}</p>
+     <button class="btn ghost" data-do="ai-check">Tester Claude</button>
+     <div id="ai-box"></div>
+
      <h3>Notifications</h3>
      <div id="push-box"><p class="hint">Vérification…</p></div>
      ${tick('n-start', "À l'heure prévue d'une tâche ou d'un bloc d'appels", n.notif_start)}
@@ -1019,6 +1024,17 @@ async function openSettings() {
     } else if (act === 'push-off') {
       await guard(disablePush);
       drawPush();
+    } else if (act === 'ai-check') {
+      const btn = e.target.closest('[data-do]');
+      btn.disabled = true;
+      btn.textContent = 'Essai en cours…';
+      const res = await guard(() => api('ai/check', { method: 'POST' }));
+      btn.disabled = false;
+      btn.textContent = 'Tester Claude';
+      if (res)
+        $('#ai-box', m).innerHTML = res.ok
+          ? `<p><strong>Claude répond.</strong> Ta dictée sera analysée${res.title ? ` (essai : « ${esc(res.title)} »)` : ''}.</p>`
+          : `<p class="hint warn">${esc(res.why)}</p>${res.help ? `<p class="hint">${esc(res.help)}</p>` : ''}`;
     } else if (act === 'push-test') {
       const res = await guard(() => api('push/test', { method: 'POST' }));
       if (res) toast(res.sent ? 'Essai envoyé. Il devrait arriver dans quelques secondes.' : "L'essai n'a pas pu être envoyé.");

@@ -60,17 +60,62 @@ export function unspoken(piece) {
 }
 
 function clean(title) {
-  const t = title.trim().replace(/^[-•*\d.)\s]+/, '').replace(/[.;,]+$/, '').trim();
+  // Retire une puce ou un numéro de liste (« 1. », « 2) »), jamais un vrai nombre (« 4 logements »).
+  const t = title.trim().replace(/^(?:[-•*]\s*|\d+[.)]\s+)+/, '').replace(/[.;,]+$/, '').trim();
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
-export function parseWithRules(text, { today, defaultDay }) {
-  const pieces = text
-    .split(/\n+|;|\s+(?:et\s+)?(?:puis|pis|ensuite|après ça)\s+|,\s+(?:et\s+)?|[.!?]\s+|\s+et aussi\s+/i)
-    .map((s) => unspoken(s))
-    .filter((s) => s.length > 2);
+// Une durée dite en fin de tâche : « 30 minutes environ », « une heure », « 1 heure et demie ».
+// « heure » après « à », « avant », « vers »… est une heure du jour, pas une durée.
+const DURATION = new RegExp(
+  String.raw`(?:^|[\s,]+)(?:environ\s+)?(?:(\d+)\s*(?:minutes?|mins?)|(?<!(?<!\p{L})(?:à|a|avant|vers|pour|après|apres|dès|des)\s)(\d+|une?)\s+heures?(\s+et\s+demie?)?|(?:une\s+)?(demi[- ]heure))(?:\s+environ)?$`,
+  'iu',
+);
 
-  return pieces.map((piece) => {
+/** Sépare la durée dite à la fin d'un morceau : { text, minutes } (minutes null s'il n'y en a pas). */
+export function takeDuration(piece) {
+  const t = piece.trim().replace(/[.;,]+$/, '');
+  const m = t.match(DURATION);
+  if (!m) return { text: t, minutes: null };
+  let minutes;
+  if (m[1]) minutes = Number(m[1]);
+  else if (m[2]) minutes = (/^une?$/i.test(m[2]) ? 1 : Number(m[2])) * 60 + (m[3] ? 30 : 0);
+  else minutes = 30;
+  return { text: t.slice(0, m.index).replace(/[\s,]+$/, ''), minutes };
+}
+
+const words = (s) => s.split(/\s+/).filter(Boolean).length;
+
+/**
+ * Coupe une dictée en morceaux, un par tâche : [{ raw, minutes }].
+ * Une phrase se coupe aux virgules, sauf quand elle est dictée en style télégraphique :
+ * la transcription met alors une virgule entre chaque mot (« Faire, offre, 4 logements, Saint-Jérôme, 30 minutes environ. »),
+ * et la phrase entière est une seule tâche.
+ */
+export function splitDump(text) {
+  const out = [];
+  const sentences = text.replace(/\s*,?\s*\bslash\b\s*,?\s*/gi, '/').split(/\n+|;|[.!?…]+(?:\s+|$)/);
+  for (const sentence of sentences) {
+    const parts = sentence
+      .split(/,\s+(?:et\s+)?|\s+(?:et\s+)?(?:puis|pis|ensuite|après ça)\s+|\s+et aussi\s+/i)
+      .map((p) => takeDuration(unspoken(p)))
+      .filter((p) => p.text || p.minutes != null);
+    if (!parts.length) continue;
+    const pureDuration = parts.some((p) => !p.text);
+    const oneWord = parts.filter((p) => p.text && words(p.text) === 1).length;
+    if (pureDuration || oneWord >= 2) {
+      const raw = parts.map((p) => p.text).filter(Boolean).join(' ');
+      const minutes = parts.findLast((p) => p.minutes != null)?.minutes ?? null;
+      if (raw.length > 2) out.push({ raw, minutes });
+    } else for (const p of parts) if (p.text.length > 2) out.push({ raw: p.text, minutes: p.minutes });
+  }
+  return out;
+}
+
+export function parseWithRules(text, { today, defaultDay }) {
+  const pieces = splitDump(text);
+
+  return pieces.map(({ raw: piece, minutes }) => {
     const raw = clean(piece);
     const n = norm(raw);
     const isCall = CALL.test(n);
@@ -86,7 +131,7 @@ export function parseWithRules(text, { today, defaultDay }) {
       nature,
       day: day ?? defaultDay ?? today,
       due_date: due ?? null,
-      est_minutes: isCall ? 10 : 30,
+      est_minutes: minutes ?? (isCall ? 10 : 30),
       contact: contact || null,
       phone: raw.match(/(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/)?.[0] ?? null,
     };
