@@ -96,6 +96,10 @@ Assigne le raccourci au bouton Action ou dis « Dis Siri » suivi de son nom. La
 
 ## Claude et les coûts
 
+- Claude analyse ce que tu dictes : il sort les actions, leur donne un titre court et garde le contexte dans une note.
+  Sans clé Claude, des règles simples découpent seulement tes phrases, et la confirmation l'indique en rouge.
+  Pour brancher la clé : `npx wrangler secret put ANTHROPIC_API_KEY` dans ce dossier (la clé se tape dans le Terminal, jamais ailleurs).
+
 - Le modèle est réglé dans `wrangler.template.jsonc` (`CLAUDE_MODEL`, par défaut `claude-opus-5-5`).
   Une dictée coûte de l'ordre de quelques cents. Pour réduire beaucoup la facture, mets `claude-haiku-5-5` et relance `npm run deploy`.
 - Deux plafonds : la limite de dépense que tu fixes sur la clé, et `AI_MONTHLY_CALLS` (1500 appels par mois par défaut).
@@ -140,7 +144,7 @@ npm test
 ## Ce qui a été vérifié, et ce qui ne l'a pas été
 
 Vérifié :
-- 37 tests de logique, dont le chiffrement des notifications contre le vecteur officiel de la RFC 8291.
+- 39 tests de logique, dont le chiffrement des notifications contre le vecteur officiel de la RFC 8291.
 - Le parcours complet à l'écran, sur Mac et iPhone simulés : dictée, confirmation, cocher, glisser, chrono, imprévu, mode appels, bilan, tri du soir, réserve, ce qui revient.
 - La chaîne des notifications en local, de l'horloge jusqu'au message déchiffré par un faux appareil, sans doublon.
 - Le calendrier contre un serveur CalDAV d'essai (Radicale).
@@ -151,5 +155,5 @@ Pas encore vérifié, faute d'accès :
 - **La transcription elle-même.** Whisper n'a jamais été appelé pour vrai, ni l'enregistrement fait sur un vrai iPhone (format audio différent de celui du test).
 - Une vraie notification reçue sur un iPhone ou un Mac.
 - Le vrai calendrier iCloud.
-- Un vrai appel à Claude avec une clé valide.
+- Un vrai appel à Claude avec une clé valide. La consigne qui lui demande d'analyser la dictée (actions courtes, contexte en note) n'a donc jamais été essayée sur le vrai modèle.
 - `npm run setup` sur un vrai compte Cloudflare.

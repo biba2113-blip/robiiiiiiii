@@ -540,6 +540,7 @@ function confirmCardHtml(it, i, open) {
       <textarea class="ctitle" data-f="title" rows="1" aria-label="Tâche">${esc(it.title)}</textarea>
       <button type="button" class="cx" data-rm aria-label="Retirer cette tâche">✕</button>
     </div>
+    ${it.note ? `<p class="cnote">${esc(it.note)}</p>` : ''}
     <button type="button" class="csum" data-toggle aria-expanded="${open}">
       <span class="csum-items">
         <span class="sec">${SECTIONS[it.section]}</span>
@@ -561,13 +562,19 @@ function openConfirm(parsed, { said } = {}) {
     let openIdx = null;
     const note =
       parsed.engine === 'regles'
-        ? `<p class="hint">Classé avec les règles simples${parsed.note ? ` (${esc(parsed.note)})` : S.data.ai ? '' : ', en attendant que Claude soit branché'}. Jette un œil aux étiquettes.</p>`
+        ? `<p class="hint warnhint">${
+            parsed.note
+              ? `Claude n'a pas répondu (${esc(parsed.note)}).`
+              : S.data.ai
+                ? 'Le plafond mensuel de Claude est atteint.'
+                : "Claude n'est pas branché."
+          } J'ai seulement découpé tes phrases, sans les analyser. Corrige les titres au besoin.</p>`
         : '';
     const m = openModal(
       `<h2 id="ccount"></h2>
        ${said ? `<p class="said">« ${esc(said.length > 160 ? said.slice(0, 160) + '…' : said)} »</p>` : ''}
-       <div id="crows"></div>
        ${note}
+       <div id="crows"></div>
        <div class="foot sticky"><button class="btn ghost" data-do="cancel">Annuler</button><span class="grow"></span><button class="btn primary" data-do="add" autofocus></button></div>`,
       { wide: true },
     );

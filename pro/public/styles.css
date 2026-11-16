@@ -170,6 +170,8 @@ textarea { resize: vertical; }
 .ccard.c-robiii { border-left-color: var(--robiii); } .ccard.c-immo { border-left-color: var(--immo); } .ccard.c-perso { border-left-color: var(--perso); }
 .ccard.open { background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
 .chead { display: flex; gap: 6px; align-items: flex-start; }
+.cnote { margin: 0; color: var(--muted); font-size: 0.9rem; line-height: 1.35; }
+.warnhint { color: var(--warn); }
 .ctitle { flex: 1; font-family: var(--display); font-weight: 700; font-size: 1.08rem; line-height: 1.25; background: none; border: 0; padding: 5px 0 2px; border-radius: 6px; resize: none; overflow: hidden; }
 .cx { border: 0; background: none; color: var(--muted); width: 34px; height: 34px; border-radius: 50%; font-size: 0.95rem; flex: none; }
 .cx:hover { background: var(--warn-soft); color: var(--warn); }

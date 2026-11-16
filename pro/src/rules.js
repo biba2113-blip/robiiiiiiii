@@ -35,6 +35,30 @@ function findDates(n, today) {
   return { day, due };
 }
 
+// Le français parlé : ce qui ouvre une phrase sans rien dire, et les tournures « faut que je… ».
+const FILLER = /^(?:(?:euh+|bon|ben|ok|okay|ah oui|oui|aussi|ensuite|après ça|apres ça|pis|puis|et|alors|donc|fait que|sinon)(?:[\s,]+|$))+/i;
+const MUST_INF = /^(?:il\s+)?(?:faut|faudrait|faudra)\s+(?:aussi\s+)?(?=\S+(?:er|ir|re|oir)\b)|^(?:je\s+(?:dois|devrais|veux|voudrais|vais)|j'ai\s+à)\s+(?:aussi\s+)?/i;
+const MUST_SUBJ = /^(?:il\s+)?(?:faut|faudrait|faudra)\s+(?:aussi\s+)?que\s+(?:je\s+|j')/i;
+// « faut que j'appelle » → « Appeler » : les verbes les plus courants de ses dictées.
+const TO_INF = {
+  appelle: 'appeler', rappelle: 'rappeler', relance: 'relancer', texte: 'texter', envoie: 'envoyer', paie: 'payer', paye: 'payer',
+  fasse: 'faire', aille: 'aller', regarde: 'regarder', vérifie: 'vérifier', commande: 'commander', prépare: 'préparer',
+  réserve: 'réserver', achète: 'acheter', trouve: 'trouver', signe: 'signer', ferme: 'fermer', règle: 'régler', finisse: 'finir',
+  passe: 'passer', renouvelle: 'renouveler', confirme: 'confirmer', réponde: 'répondre', écrive: 'écrire', valide: 'valider',
+};
+
+/** Retire les tournures parlées du début d'une phrase et remet le verbe à l'infinitif quand c'est possible. */
+export function unspoken(piece) {
+  let t = piece.trim().replace(FILLER, '');
+  if (MUST_SUBJ.test(t)) {
+    t = t.replace(MUST_SUBJ, '');
+    const [verb, ...rest] = t.split(/\s+/);
+    const inf = TO_INF[verb.toLowerCase()];
+    if (inf) t = [inf, ...rest].join(' ');
+  } else t = t.replace(MUST_INF, '');
+  return t.trim();
+}
+
 function clean(title) {
   const t = title.trim().replace(/^[-•*\d.)\s]+/, '').replace(/[.;,]+$/, '').trim();
   return t.charAt(0).toUpperCase() + t.slice(1);
@@ -42,8 +66,8 @@ function clean(title) {
 
 export function parseWithRules(text, { today, defaultDay }) {
   const pieces = text
-    .split(/\n+|;|\s+puis\s+|,\s+(?:et\s+)?|\.\s+|\s+et aussi\s+/i)
-    .map((s) => s.trim())
+    .split(/\n+|;|\s+(?:et\s+)?(?:puis|pis|ensuite|après ça)\s+|,\s+(?:et\s+)?|[.!?]\s+|\s+et aussi\s+/i)
+    .map((s) => unspoken(s))
     .filter((s) => s.length > 2);
 
   return pieces.map((piece) => {

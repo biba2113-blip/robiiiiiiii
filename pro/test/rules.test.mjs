@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseWithRules, nextWeekday } from '../src/rules.js';
+import { parseWithRules, nextWeekday, unspoken } from '../src/rules.js';
 import { sanitize } from '../src/parse.js';
 import { toLocal, toUtc, addDays, dow } from '../src/time.js';
 
@@ -48,8 +48,28 @@ test('une liste sur plusieurs lignes', () => {
 
 test('le nettoyage refuse les valeurs inventées', () => {
   const t = sanitize({ title: '  Test  ', section: 'nimporte', company: 'x', nature: 'y', day: 'demain', due_date: '31 nov', est_minutes: 9999 }, CTX);
-  assert.deepEqual(t, { title: 'Test', section: 'faire', company: 'perso', nature: 'autre', day: '2026-11-16', due_date: null, est_minutes: 480, contact: null, phone: null });
+  assert.deepEqual(t, { title: 'Test', section: 'faire', company: 'perso', nature: 'autre', day: '2026-11-16', due_date: null, est_minutes: 480, contact: null, phone: null, note: null });
   assert.equal(sanitize({ title: '' }, CTX), null);
   assert.equal(sanitize({ title: 'x', day: null }, CTX).day, null); // la réserve
   assert.equal(sanitize({ title: 'x', day: '2026-11-01' }, CTX).day, '2026-11-16'); // jamais dans le passé
+});
+
+test('le français parlé est allégé, même sans Claude', () => {
+  assert.equal(unspoken("Euh, faut que j'appelle Marc pour la soumission"), 'appeler Marc pour la soumission');
+  assert.equal(unspoken('pis je dois payer la facture du plombier'), 'payer la facture du plombier');
+  assert.equal(unspoken('Il faudrait que je renouvelle les plaques'), 'renouveler les plaques');
+  assert.equal(unspoken('faut envoyer le bail'), 'envoyer le bail');
+  assert.equal(unspoken('Faut que je comprenne le dossier'), 'comprenne le dossier'); // verbe inconnu : laissé tel quel
+  assert.equal(unspoken('Rappeler le notaire'), 'Rappeler le notaire');
+
+  const items = parseWithRules("Bon, faut que j'appelle Marc pour la soumission pis je dois payer la facture du plombier avant vendredi. Ah oui, faudrait que je renouvelle les plaques.", CTX);
+  assert.deepEqual(items.map((i) => i.title), ['Appeler Marc pour la soumission', 'Payer la facture du plombier avant vendredi', 'Renouveler les plaques']);
+  assert.equal(items[0].section, 'rappel');
+  assert.equal(items[1].due_date, '2026-11-20');
+});
+
+test('la note passe le nettoyage, bornée à 160 caractères', () => {
+  assert.equal(sanitize({ title: 'x', note: '  Chauffage   en panne\nau 2 ' }, CTX).note, 'Chauffage en panne au 2');
+  assert.equal(sanitize({ title: 'x', note: 'a'.repeat(300) }, CTX).note.length, 160);
+  assert.equal(sanitize({ title: 'x', note: '   ' }, CTX).note, null);
 });

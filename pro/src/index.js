@@ -146,9 +146,9 @@ async function createTasks(env, ctx, items, { source = 'manuel', captureId = nul
   const stamp = Date.now();
   const stmts = clean.map((t, i) =>
     env.DB.prepare(
-      `INSERT INTO tasks (title, section, company, nature, day, due_date, est_minutes, contact, phone, sort, source, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(t.title, t.section, t.company, t.nature, t.day, t.due_date, t.est_minutes, t.contact, t.phone, stamp + i, source, nowIso()),
+      `INSERT INTO tasks (title, section, company, nature, day, due_date, est_minutes, contact, phone, note, sort, source, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(t.title, t.section, t.company, t.nature, t.day, t.due_date, t.est_minutes, t.contact, t.phone, t.note, stamp + i, source, nowIso()),
   );
   if (stmts.length) await env.DB.batch(stmts);
   if (captureId) await run(env, 'UPDATE captures SET confirmed_at = ? WHERE id = ?', nowIso(), captureId);
