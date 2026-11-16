@@ -347,71 +347,92 @@ function openEdit(id) {
 }
 
 // Confirmer ce que l'outil a compris
-function confirmRowHtml(it, i) {
+function confirmCardHtml(it, i, open) {
   const d = S.data;
   const dayOpts = [[d.today, "Aujourd'hui"], [addDays(d.today, 1), 'Demain'], ['', 'Réserve']];
   if (it.day && !dayOpts.some(([v]) => v === it.day)) dayOpts.splice(2, 0, [it.day, dayLabel(it.day)]);
-  const sel = (name, opts, val) =>
-    `<select class="tag" data-f="${name}" aria-label="${name}">${opts.map(([v, l]) => `<option value="${esc(v)}"${String(v) === String(val ?? '') ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
   const durs = DURATIONS.includes(it.est_minutes) ? DURATIONS : [...DURATIONS, it.est_minutes].sort((a, b) => a - b);
-  return `<div class="crow" data-i="${i}">
-    <input class="ctitle" data-f="title" value="${esc(it.title)}" aria-label="Tâche">
-    <div class="ctags">
-      ${sel('section', Object.entries(SECTIONS), it.section)}
-      <span class="tagwrap c-${it.company}"><i class="dot c-${it.company}"></i>${sel('company', Object.entries(COMPANIES), it.company)}</span>
-      ${sel('day', dayOpts, it.day)}
-      ${sel('est_minutes', durs.map((n) => [n, fmtDur(n)]), it.est_minutes)}
-      ${it.due_date ? `<span class="tag due">Échéance ${esc(dayLabel(it.due_date).toLowerCase())}</span>` : ''}
-      <button type="button" class="tag x" data-rm aria-label="Retirer">Retirer</button>
+  const edit = open
+    ? `<div class="cedit">
+        <div class="field"><span>Section</span>${chips('section', Object.entries(SECTIONS), it.section)}</div>
+        <div class="field"><span>Entreprise</span>${chips('company', Object.entries(COMPANIES).map(([k, v]) => [k, `<i class="dot c-${k}"></i>${v}`]), it.company)}</div>
+        <div class="field"><span>Jour</span>${chips('day', dayOpts, it.day ?? '')}</div>
+        <div class="field"><span>Durée</span>${chips('est_minutes', durs.map((n) => [n, fmtDur(n)]), it.est_minutes)}</div>
+      </div>`
+    : '';
+  return `<div class="ccard c-${it.company}${open ? ' open' : ''}" data-i="${i}">
+    <div class="chead">
+      <textarea class="ctitle" data-f="title" rows="1" aria-label="Tâche">${esc(it.title)}</textarea>
+      <button type="button" class="cx" data-rm aria-label="Retirer cette tâche">✕</button>
     </div>
+    <button type="button" class="csum" data-toggle aria-expanded="${open}">
+      <span class="csum-items">
+        <span class="sec">${SECTIONS[it.section]}</span>
+        <span><i class="dot c-${it.company}"></i>${COMPANIES[it.company]}</span>
+        <span>${esc(dayLabel(it.day))}</span>
+        <span>${fmtDur(it.est_minutes)}</span>
+        ${it.due_date ? `<span class="due">Échéance ${esc(dayLabel(it.due_date).toLowerCase())}</span>` : ''}
+      </span>
+      <span class="chev">${open ? 'Fermer' : 'Corriger'}</span>
+    </button>
+    ${edit}
   </div>`;
 }
 
 /** Ouvre la confirmation. Résout avec le nombre de tâches ajoutées (0 si annulé). */
-function openConfirm(parsed, { said, defaultDay } = {}) {
+function openConfirm(parsed, { said } = {}) {
   return new Promise((resolve) => {
     const items = parsed.items.map((it) => ({ ...it }));
+    let openIdx = null;
     const note =
       parsed.engine === 'regles'
-        ? `<p class="hint warn">Classé avec les règles simples${parsed.note ? ` (${esc(parsed.note)})` : S.data.ai ? '' : ' : Claude n’est pas encore branché'}. Vérifie les étiquettes.</p>`
+        ? `<p class="hint">Classé avec les règles simples${parsed.note ? ` (${esc(parsed.note)})` : S.data.ai ? '' : ', en attendant que Claude soit branché'}. Jette un œil aux étiquettes.</p>`
         : '';
     const m = openModal(
-      `<h2>Voici ce que j'ai compris</h2>
-       ${said ? `<p class="said">« ${esc(said.length > 220 ? said.slice(0, 220) + '…' : said)} »</p>` : ''}
+      `<h2 id="ccount"></h2>
+       ${said ? `<p class="said">« ${esc(said.length > 160 ? said.slice(0, 160) + '…' : said)} »</p>` : ''}
+       <div id="crows"></div>
        ${note}
-       <div id="crows">${items.map(confirmRowHtml).join('')}</div>
-       <p class="hint">Touche une étiquette pour la changer.</p>
-       <div class="foot"><button class="btn ghost" data-do="cancel">Annuler</button><span class="grow"></span><button class="btn" data-do="add" autofocus></button></div>`,
+       <div class="foot sticky"><button class="btn ghost" data-do="cancel">Annuler</button><span class="grow"></span><button class="btn primary" data-do="add" autofocus></button></div>`,
       { wide: true },
     );
     const addBtn = $('[data-do="add"]', m);
     const alive = () => items.filter(Boolean);
-    const label = () => {
+    const draw = () => {
+      $('#crows', m).innerHTML = items.map((it, i) => (it ? confirmCardHtml(it, i, i === openIdx) : '')).join('');
+      for (const ta of m.querySelectorAll('.ctitle')) autoGrow(ta);
       const n = alive().length;
+      $('#ccount', m).textContent = n > 1 ? `${n} tâches à ajouter` : n === 1 ? 'Une tâche à ajouter' : 'Plus rien à ajouter';
       addBtn.textContent = n > 1 ? `Ajouter les ${n}` : n === 1 ? 'Ajouter' : 'Rien à ajouter';
       addBtn.disabled = !n;
     };
-    label();
+    draw();
     m.addEventListener('input', (e) => {
-      const row = e.target.closest('.crow');
-      const f = e.target.dataset.f;
-      if (!row || !f) return;
-      const it = items[+row.dataset.i];
-      const v = e.target.value;
-      it[f] = f === 'est_minutes' ? Number(v) : f === 'day' ? v || null : v;
-      if (f === 'company') {
-        const wrap = e.target.closest('.tagwrap');
-        wrap.className = `tagwrap c-${v}`;
-        $('.dot', wrap).className = `dot c-${v}`;
+      const card = e.target.closest('.ccard');
+      if (card && e.target.dataset.f === 'title') {
+        items[+card.dataset.i].title = e.target.value.replace(/\n/g, ' ');
+        autoGrow(e.target);
       }
     });
+    m.addEventListener('chips', (e) => {
+      const card = e.target.closest('.ccard');
+      if (!card) return;
+      const it = items[+card.dataset.i];
+      const f = e.target.dataset.chips;
+      const v = chipValue(card, f);
+      it[f] = f === 'est_minutes' ? Number(v) : f === 'day' ? v || null : v;
+      draw();
+    });
     m.addEventListener('click', async (e) => {
-      const rm = e.target.closest('[data-rm]');
-      if (rm) {
-        const row = rm.closest('.crow');
-        items[+row.dataset.i] = null;
-        row.remove();
-        return label();
+      const card = e.target.closest('.ccard');
+      if (card && e.target.closest('[data-rm]')) {
+        items[+card.dataset.i] = null;
+        if (openIdx === +card.dataset.i) openIdx = null;
+        return draw();
+      }
+      if (card && e.target.closest('[data-toggle]')) {
+        openIdx = openIdx === +card.dataset.i ? null : +card.dataset.i;
+        return draw();
       }
       const act = e.target.closest('[data-do]')?.dataset.do;
       if (act === 'cancel') {
