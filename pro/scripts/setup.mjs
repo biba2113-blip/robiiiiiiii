@@ -1,7 +1,7 @@
 // Installation de Pro sur ton compte Cloudflare. À lancer une seule fois : npm run setup
 // Crée la base, pose tes secrets (jamais écrits dans le dépôt), met Pro en ligne et affiche ton lien privé.
 import { spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, generateKeyPairSync } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -85,18 +85,31 @@ async function main() {
   if (!key) key = randomBytes(24).toString('base64url');
   secret('ACCESS_KEY', key);
 
-  step(5, 'Claude, pour comprendre ta dictée');
+  step(5, 'Les notifications');
+  const secrets = wrangler(['secret', 'list']).out;
+  if (/VAPID_PRIVATE_JWK/.test(secrets)) console.log('  Clés déjà en place.');
+  else {
+    // Une paire de clés propre à ton installation : elle signe les notifications envoyées à tes appareils.
+    const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    const pub = publicKey.export({ format: 'jwk' });
+    const raw = Buffer.concat([Buffer.from([4]), Buffer.from(pub.x, 'base64url'), Buffer.from(pub.y, 'base64url')]);
+    secret('VAPID_PRIVATE_JWK', JSON.stringify(privateKey.export({ format: 'jwk' })));
+    secret('VAPID_PUBLIC', raw.toString('base64url'));
+  }
+
+  step(6, 'Claude, pour comprendre ta dictée');
   console.log('  Colle la clé réservée à Pro (elle commence par sk-ant-). Entrée seule pour passer : les règles simples classeront en attendant.');
   const claude = await ask('  Clé Claude : ', { hidden: true });
   if (claude) secret('ANTHROPIC_API_KEY', claude);
   else console.log('  Passé. Tu pourras la poser plus tard : npx wrangler secret put ANTHROPIC_API_KEY');
 
-  step(6, 'Ton calendrier iCloud');
+  step(7, 'Ton calendrier iCloud');
   console.log('  Ton identifiant Apple (courriel) et le mot de passe d’application créé pour Pro. Entrée seule pour passer.');
   const user = await ask('  Identifiant Apple : ');
   if (user) {
     const pass = await ask('  Mot de passe d’application : ', { hidden: true });
     if (pass) {
+      secret('VAPID_SUBJECT', `mailto:${user}`);
       secret('ICLOUD_USER', user);
       secret('ICLOUD_APP_PASSWORD', pass.replace(/\s+/g, ''));
     }
@@ -106,6 +119,8 @@ async function main() {
   writeFileSync(linkFile, link + '\n');
   console.log(`\nC’est prêt. Ton lien privé :\n\n  ${link}\n`);
   console.log('Ouvre-le sur ton iPhone dans Safari, puis Partager, « Sur l’écran d’accueil ».');
+  console.log('Ensuite, dans Pro : ⚙, Notifications, « Activer sur cet appareil ».');
+  console.log('Pour l’assistant du Mac : npm run assistant:install');
   console.log('Le lien est aussi gardé dans le fichier .pro-lien de ce dossier (hors du dépôt). Ne le partage pas.');
 }
 

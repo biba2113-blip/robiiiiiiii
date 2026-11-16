@@ -64,6 +64,7 @@ export function parseWithRules(text, { today, defaultDay }) {
       due_date: due ?? null,
       est_minutes: isCall ? 10 : 30,
       contact: contact || null,
+      phone: raw.match(/(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/)?.[0] ?? null,
     };
   });
 }

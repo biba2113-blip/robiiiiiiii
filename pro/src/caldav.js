@@ -235,7 +235,7 @@ export async function eventsFor(env, date, { fresh = false } = {}) {
 
 const esc = (s) => String(s).replace(/\\/g, '\\\\').replace(/([,;])/g, '\\$1').replace(/\n/g, '\\n');
 
-export function icsFor(task, uid) {
+export function icsFor(task, uid, { alarm = true } = {}) {
   const start = toUtc(task.day, task.start_min);
   const end = start + task.est_minutes * 60000;
   const title = task.section === 'rappel' ? `📞 ${task.title}` : task.title;
@@ -251,11 +251,7 @@ export function icsFor(task, uid) {
     `SUMMARY:${esc(title)}`,
     'DESCRIPTION:Bloc placé par Pro',
     `X-PRO-TASK:${task.id}`,
-    'BEGIN:VALARM',
-    'ACTION:DISPLAY',
-    `DESCRIPTION:${esc(title)}`,
-    'TRIGGER:PT0M',
-    'END:VALARM',
+    ...(alarm ? ['BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(title)}`, 'TRIGGER:PT0M', 'END:VALARM'] : []),
     'END:VEVENT',
     'END:VCALENDAR',
     '',
@@ -277,13 +273,22 @@ export async function syncTask(env, id, depth = 0) {
   if (!task) return;
   const url = await calendarUrl(env);
   if (wanted(task)) {
-    const sig = signature(task);
+    // Des appels placés bout à bout forment un bloc : seule la première alerte sonne.
+    const follows =
+      task.section === 'rappel' &&
+      (await env.DB.prepare(
+        "SELECT 1 FROM tasks WHERE status = 'todo' AND section = 'rappel' AND day = ? AND id != ? AND start_min + est_minutes = ? LIMIT 1",
+      )
+        .bind(task.day, task.id, task.start_min)
+        .first());
+    const alarm = !follows;
+    const sig = `${signature(task)}|${alarm ? 'a' : 's'}`;
     if (task.cal_uid && task.cal_sig === sig) return;
     const uid = task.cal_uid || `pro-${task.id}`; // toujours la même adresse : écrire deux fois ne crée pas de doublon
-    await dav(env, 'PUT', `${url}${uid}.ics`, { body: icsFor(task, uid), type: 'text/calendar; charset=utf-8' });
+    await dav(env, 'PUT', `${url}${uid}.ics`, { body: icsFor(task, uid, { alarm }), type: 'text/calendar; charset=utf-8' });
     await env.DB.prepare('UPDATE tasks SET cal_uid = ?, cal_sig = ? WHERE id = ?').bind(uid, sig, id).run();
     const after = await read();
-    if (depth < 2 && after && (!wanted(after) || signature(after) !== sig)) return syncTask(env, id, depth + 1);
+    if (depth < 2 && after && (!wanted(after) || !sig.startsWith(signature(after) + '|'))) return syncTask(env, id, depth + 1);
   } else if (task.cal_uid) {
     await dav(env, 'DELETE', `${url}${task.cal_uid}.ics`);
     await env.DB.prepare('UPDATE tasks SET cal_uid = NULL, cal_sig = NULL WHERE id = ?').bind(id).run();

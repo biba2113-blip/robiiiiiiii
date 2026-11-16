@@ -91,14 +91,22 @@ async function load(date = S.date, opts = {}) {
 
 const isAvoided = (t) => t.status === 'todo' && t.pushed_count >= 2;
 
-function metaOf(t, { withTime = true } = {}) {
+function metaOf(t) {
   const d = S.data;
   const bits = [];
-  if (withTime && t.start_min != null && t.status === 'todo') bits.push(fmtTime(t.start_min));
+  const tracked = d.tracked?.[t.id] || 0;
+  if (d.focus?.task_id === t.id) bits.push('En cours');
+  if (t.status === 'done') {
+    if (t.actual_minutes) bits.push(`Fait en ${fmtDur(t.actual_minutes)}`);
+  } else {
+    if (t.start_min != null) bits.push(fmtTime(t.start_min));
+    if (tracked) bits.push(`${fmtDur(tracked)} dessus`);
+  }
   if (t.due_date) {
     const n = daysBetween(d.today, t.due_date);
     bits.push(n < 0 ? 'Échéance dépassée' : n === 0 ? "Échéance aujourd'hui" : `Échéance ${dayLabel(t.due_date).toLowerCase()}`);
   }
+  if (t.note) bits.push(t.note);
   if (t.pushed_count === 1) bits.push('Reportée 1 fois');
   if (t.pushed_count > 1) bits.push(`Reportée ${t.pushed_count} fois`);
   if (t.section !== 'rappel' || !bits.length) bits.push(fmtDur(t.est_minutes));
@@ -107,6 +115,7 @@ function metaOf(t, { withTime = true } = {}) {
 
 function rowHtml(t, { num, avoid = false } = {}) {
   const done = t.status === 'done';
+  const cur = S.data.focus?.task_id === t.id;
   const lead = num ? `<span class="num">${num}</span>` : '';
   let extra = '';
   if (avoid) {
@@ -114,10 +123,11 @@ function rowHtml(t, { num, avoid = false } = {}) {
       ? `<span class="chip">Premier pas : ${esc(t.first_step)}</span>`
       : `<button class="chip chip-btn" data-act="first-step" data-id="${t.id}">Trouver un premier pas de 10 minutes</button>`;
   }
-  return `<div class="row${done ? ' done' : ''}" data-id="${t.id}">
+  return `<div class="row${done ? ' done' : ''}${cur ? ' current' : ''}" data-id="${t.id}">
     ${lead}<button class="cb${done ? ' on' : ''}" data-act="check" aria-label="${done ? 'Décocher' : 'Cocher'} : ${esc(t.title)}"></button>
-    <div class="t" data-act="edit" role="button" tabindex="0"><span class="tt">${esc(t.title)}</span><small>${esc(metaOf(t))}</small>${extra}</div>
+    <div class="t" data-act="${done ? 'edit' : 'focus'}" role="button" tabindex="0" aria-pressed="${cur}"><span class="tt">${esc(t.title)}</span><small>${esc(metaOf(t))}</small>${extra}</div>
     <i class="dot c-${t.company}" title="${COMPANIES[t.company]}"></i>
+    ${done ? '' : `<button class="more" data-act="edit" aria-label="Modifier : ${esc(t.title)}">⋯</button>`}
     ${done || avoid ? '' : '<span class="grip" data-grip aria-hidden="true">⠿</span>'}
   </div>`;
 }
@@ -137,7 +147,7 @@ function boxHtml(section, tasks) {
   }[section];
   const hint = section === 'priorite' && todo.length > 5 ? `<p class="hint warn">Plus de 5 priorités : glisse les moins pressantes vers À faire.</p>` : '';
   return `<section class="box" data-drop="section:${section}">
-    <h2>${SECTIONS[section]}<span class="count">${todo.length || ''}</span></h2>
+    <h2>${SECTIONS[section]}<span class="count">${todo.length || ''}</span>${section === 'rappel' && todo.length ? '<button class="link" data-act="calls">Mode appels</button>' : ''}</h2>
     ${ordered.map((t, i) => rowHtml(t, { num: section === 'priorite' ? i + 1 : 0 })).join('')}
     ${done.map((t) => rowHtml(t)).join('')}
     ${tasks.length ? '' : `<p class="empty">${empty}</p>`}${hint}
@@ -156,7 +166,7 @@ function avoidHtml(tasks) {
 function scheduleHtml() {
   const d = S.data;
   const isToday = d.date === d.today;
-  const rows = [];
+  let rows = [];
   for (const ev of d.events) if (!ev.allDay) rows.push({ t: ev.start_min, kind: 'rdv', title: ev.title, end: ev.end_min });
   for (const t of d.tasks) if (t.start_min != null && t.status === 'todo') rows.push({ t: t.start_min, kind: 'task', task: t });
   const sup = d.settings;
@@ -175,6 +185,19 @@ function scheduleHtml() {
   }
   rows.sort((x, y) => x.t - y.t || (x.kind === 'rdv' ? -1 : 1));
 
+  // Des appels placés bout à bout deviennent un seul bloc.
+  const merged = [];
+  for (const r of rows) {
+    const last = merged[merged.length - 1];
+    const isCall = r.kind === 'task' && r.task.section === 'rappel';
+    if (isCall && last?.kind === 'calls' && last.end === r.t) {
+      last.tasks.push(r.task);
+      last.end = r.t + r.task.est_minutes;
+    } else if (isCall) merged.push({ t: r.t, kind: 'calls', tasks: [r.task], end: r.t + r.task.est_minutes });
+    else merged.push(r);
+  }
+  rows = merged.map((r) => (r.kind === 'calls' && r.tasks.length === 1 ? { t: r.t, kind: 'task', task: r.tasks[0] } : r));
+
   const allDay = d.events.filter((e) => e.allDay);
   const unplaced = d.tasks.filter((t) => t.status === 'todo' && t.start_min == null);
   const hours = `${fmtTime(d.day.work_start)} à ${fmtTime(d.day.work_end)}${d.day.evening_work ? `, puis jusqu'à ${fmtTime(d.day.evening_end)}` : ''}`;
@@ -183,8 +206,14 @@ function scheduleHtml() {
     if (r.kind === 'rdv') return `<div class="blk rdv">${esc(r.title)}<small>Rendez-vous · jusqu'à ${fmtTime(r.end)}</small></div>`;
     if (r.kind === 'souper') return `<div class="blk plain">Souper</div>`;
     if (r.kind === 'libre') return `<div class="blk free">Libre pour les imprévus<small>jusqu'à ${fmtTime(r.end)}</small></div>`;
+    if (r.kind === 'calls') {
+      return `<div class="blk calls" data-act="calls" role="button" tabindex="0">${r.tasks.length} personnes à rappeler<small>${esc(r.tasks.map((t) => t.contact || t.title).join(' · '))}</small><small class="go">Ouvrir le mode appels</small></div>`;
+    }
     const t = r.task;
-    return `<div class="blk c-${t.company}${t.status === 'done' ? ' done' : ''}" data-act="edit" data-id="${t.id}" role="button" tabindex="0">${t.section === 'rappel' ? 'Appel : ' : ''}${esc(t.title)}<small>${fmtDur(t.est_minutes)}${t.pinned ? ' · heure fixée' : ''}</small></div>`;
+    const cur = d.focus?.task_id === t.id;
+    return `<div class="blk task c-${t.company}${cur ? ' current' : ''}" data-id="${t.id}">
+      <div class="bt" data-act="edit" role="button" tabindex="0">${t.section === 'rappel' ? 'Appel : ' : ''}${esc(t.title)}<small>${cur ? 'En cours · ' : ''}${fmtDur(t.est_minutes)}${t.pinned ? ' · heure fixée' : ''}</small></div>
+      <span class="grip" data-grip aria-hidden="true">⠿</span></div>`;
   };
 
   return `<section class="box horaire">
@@ -211,14 +240,16 @@ function bannersHtml() {
   if (d.date === d.today && d.triage.length) {
     out.push(`<button class="banner" data-act="triage">${d.triage.length} tâche${d.triage.length > 1 ? 's' : ''} des autres jours à trier<span>Trier</span></button>`);
   }
-  if (d.date === d.today && d.dow === 0 && d.reserve_count) {
-    out.push(`<button class="banner" data-act="reserve">C'est dimanche : revois ta réserve (${d.reserve_count})<span>Revoir</span></button>`);
+  if (d.date === d.today && d.dow === 0) {
+    out.push(`<button class="banner" data-act="mirror">C'est dimanche : ton miroir de la semaine et ta réserve (${d.reserve_count})<span>Voir</span></button>`);
   }
   if (d.calendar.on && d.calendar.error) {
     out.push(`<button class="banner warn" data-act="settings">Calendrier : ${esc(d.calendar.error)}<span>Voir</span></button>`);
   }
   return out.join('');
 }
+
+const elapsed = (since) => fmtDur(Math.max(0, Math.round((Date.now() - since) / 60000)));
 
 function render() {
   const d = S.data;
@@ -228,11 +259,22 @@ function render() {
   const pct = total ? Math.round((done / total) * 100) : 0;
   const buffer = d.summary.available - d.summary.capacity;
   const over = d.summary.planned - d.summary.capacity;
+  const real = d.pace && d.pace >= 1.2 ? ` · à ton rythme, plutôt ${fmtDur(Math.round((d.summary.planned * d.pace) / 5) * 5)}` : '';
   const load = d.summary.overflow
     ? `<span class="warn">Ça déborde de ${fmtDur(Math.ceil(over / 5) * 5)}. Glisse des tâches vers demain.</span>`
-    : `Prévu ${fmtDur(d.summary.planned)} sur ${fmtDur(d.summary.capacity)} · ${fmtDur(buffer)} gardées pour les imprévus`;
+    : `Prévu ${fmtDur(d.summary.planned)} sur ${fmtDur(d.summary.capacity)}${real} · ${fmtDur(buffer)} gardées pour les imprévus`;
+  const off = d.off?.active
+    ? `<span class="${d.off.minutes >= d.off.budget ? 'warn' : ''}">Hors feuille : ${fmtDur(d.off.minutes)} sur ${fmtDur(d.off.budget)}</span>`
+    : '';
   const by = (s) => tasks.filter((t) => t.section === s);
   const keep = $('#capture-text')?.value || '';
+  const f = d.focus;
+  const isToday = d.date === d.today;
+  const nowbar = f
+    ? `<div class="nowbar ${f.kind}"><i class="pulse"></i><span class="nb-t">${f.kind === 'imprevu' ? 'Imprévu' : 'En cours'}${f.kind === 'imprevu' && f.title === 'Imprévu' ? '' : ` : <strong>${esc(f.title)}</strong>`}</span>
+        <span class="nb-time" data-since="${f.started_at}">${elapsed(f.started_at)}</span>
+        <button class="pill" data-act="stop">${f.kind === 'imprevu' ? "Fin de l'imprévu" : 'Pause'}</button></div>`
+    : '';
 
   app.innerHTML = `
     <header class="top">
@@ -240,15 +282,17 @@ function render() {
         <button class="icon" data-act="prev" aria-label="Jour précédent">‹</button>
         <h1>${esc(cap(longDate(d.date)))}</h1>
         <button class="icon" data-act="next" aria-label="Jour suivant">›</button>
-        ${d.date !== d.today ? `<button class="pill" data-act="today">Revenir à aujourd'hui</button>` : ''}
+        ${isToday ? '' : `<button class="pill" data-act="today">Revenir à aujourd'hui</button>`}
       </div>
       <div class="actions">
+        ${isToday && f?.kind !== 'imprevu' ? `<button class="pill alert" data-act="imprevu">Imprévu</button>` : ''}
         <button class="pill" data-act="reserve">Réserve${d.reserve_count ? ` · ${d.reserve_count}` : ''}</button>
-        ${d.date === d.today ? `<button class="pill strong" data-act="evening">Préparer demain</button>` : ''}
+        ${isToday ? `<button class="pill strong" data-act="evening">Préparer demain</button>` : ''}
         <button class="icon" data-act="settings" aria-label="Réglages">⚙</button>
       </div>
+      ${nowbar}
       <div class="prog"><div class="prog-bar"><i style="width:${pct}%"></i></div><span>${total ? `${done} sur ${total} faite${done > 1 ? 's' : ''}` : 'Feuille vide'}</span></div>
-      <div class="sub"><span class="load">${load}</span>
+      <div class="sub"><span class="load">${load}</span>${off}
         <span class="legend"><span><i class="dot c-robiii"></i>Robiii</span><span><i class="dot c-immo"></i>ImmoMulti</span><span><i class="dot c-perso"></i>Perso</span></span>
       </div>
     </header>
@@ -265,6 +309,12 @@ function render() {
   ta.value = keep;
   autoGrow(ta);
 }
+
+// Le chrono de la barre « En cours » avance sans recharger la feuille.
+setInterval(() => {
+  const el = $('.nb-time');
+  if (el) el.textContent = elapsed(Number(el.dataset.since));
+}, 15000);
 
 function autoGrow(ta) {
   ta.style.height = 'auto';
@@ -317,6 +367,7 @@ function openEdit(id) {
     <div class="field"><span>Durée</span>${chips('dur', DURATIONS.map((n) => [n, fmtDur(n)]), DURATIONS.includes(t.est_minutes) ? t.est_minutes : '')}</div>
     <div class="field two"><label><span>Heure</span><input type="time" id="e-time" step="300" value="${t.start_min != null ? toTimeInput(t.start_min) : ''}"></label>
       <label><span>Échéance</span><input type="date" id="e-due" value="${t.due_date || ''}"></label></div>
+    <label class="field"><span>Téléphone (pour le mode appels)</span><input type="tel" id="e-phone" value="${esc(t.phone || '')}" placeholder="450 555-0123"></label>
     <p class="hint">Laisse l'heure vide pour que l'outil place la tâche. Une heure choisie ne bouge plus.</p>
     <div class="foot"><button class="btn danger" data-do="delete">Supprimer</button><span class="grow"></span><button class="btn ghost" data-act="close">Annuler</button><button class="btn" data-do="save">Enregistrer</button></div>`);
   m.addEventListener('chips', () => ($('#e-date', m).hidden = chipValue(m, 'day') !== 'other'));
@@ -334,6 +385,7 @@ function openEdit(id) {
         section: chipValue(m, 'section'),
         company: chipValue(m, 'company'),
         due_date: $('#e-due', m).value || null,
+        phone: $('#e-phone', m).value.trim() || null,
       };
       const dur = Number(chipValue(m, 'dur'));
       if (dur && dur !== t.est_minutes) body.est_minutes = dur;
@@ -570,8 +622,15 @@ async function openEvening() {
       toast('Ta feuille de demain est prête.');
     });
   };
-  if (left.length) openTriage(left, { to: tomorrow, title: 'Préparer demain · ce qui reste', onDone: stepQuestions });
-  else stepQuestions();
+  const stepTriage = () => {
+    if (left.length) openTriage(left, { to: tomorrow, title: 'Préparer demain · ce qui reste', onDone: stepQuestions });
+    else stepQuestions();
+  };
+  const b = await guard(() => api(`bilan?date=${d.today}`));
+  if (!b) return stepTriage();
+  const m = openModal(`<p class="step">Préparer demain · ta journée</p><h2>Prévu contre fait</h2>${bilanHtml(b)}
+    <div class="foot"><button class="btn ghost" data-act="close">Fermer</button><span class="grow"></span><button class="btn" data-do="next" autofocus>Continuer</button></div>`);
+  $('[data-do="next"]', m).addEventListener('click', stepTriage);
 }
 
 // La réserve et la revue du dimanche
@@ -628,6 +687,118 @@ async function openInbox() {
   load();
 }
 
+// Le bilan du soir : prévu contre fait
+function bilanHtml(b) {
+  const measured = b.measured > 0;
+  const cell = (r) =>
+    measured
+      ? `<span class="${r.planned >= 30 && r.done < r.planned / 2 ? 'bad' : 'ok'}">${fmtDur(r.done)}</span>`
+      : `<span>${r.checked} sur ${r.count}</span>`;
+  const rows = b.rows.map((r) => `<div class="mrow"><span>${esc(r.label)}</span><span>${fmtDur(r.planned)}</span>${cell(r)}</div>`).join('');
+  const imp = measured || b.imprevu.done ? `<div class="mrow"><span>Imprévus</span><span>${fmtDur(b.imprevu.planned)}</span><span>${fmtDur(b.imprevu.done)}</span></div>` : '';
+  const off = b.off.active
+    ? `<div class="mrow"><span>Hors feuille</span><span>${fmtDur(b.off.budget)}</span><span class="${b.off.minutes > b.off.budget ? 'bad' : 'ok'}">${fmtDur(b.off.minutes)}</span></div>`
+    : '';
+  const notes = [];
+  if (b.off.overrides) notes.push(`« Continuer quand même » choisi ${b.off.overrides} fois.`);
+  if (b.off.stops.length) notes.push(`Assistant du Mac fermé à ${b.off.stops.map(fmtTime).join(', ')}.`);
+  if (b.pace && b.pace >= 1.2) notes.push(`Tes tâches prennent environ ${String(b.pace).replace('.', ',')} fois le temps prévu.`);
+  return `<div class="bilan">
+      <div class="mrow head"><span>Type de travail</span><span>Prévu</span><span>${measured ? 'Fait' : 'Coché'}</span></div>
+      ${rows || '<p class="empty">Aucune tâche sur cette feuille.</p>'}${imp}${off}
+    </div>
+    <p class="callout">${esc(b.sentence)}</p>
+    ${notes.length ? `<p class="hint">${notes.map(esc).join(' ')}</p>` : ''}`;
+}
+
+// Le miroir de la semaine
+async function openMirror() {
+  const mi = await guard(() => api('mirror'));
+  if (!mi) return;
+  const m = openModal(`<p class="step">Le miroir · ${esc(dayLabel(mi.from).toLowerCase())} au ${esc(longDate(mi.to))}</p>
+    <h2>Ta semaine en trois constats</h2>
+    <ol class="facts">${mi.facts.map((f) => `<li>${esc(f)}</li>`).join('')}</ol>
+    <h3>Un seul ajustement</h3>
+    <p class="callout">${esc(mi.adjust)}</p>
+    <div class="foot"><button class="btn ghost" data-act="close">Fermer</button><span class="grow"></span>${S.data.reserve_count ? `<button class="btn" data-do="reserve">Revoir ma réserve (${S.data.reserve_count})</button>` : ''}</div>`);
+  $('[data-do="reserve"]', m)?.addEventListener('click', () => {
+    closeModal();
+    openReserve();
+  });
+}
+
+// Le mode appels : une personne à la fois
+async function openCalls() {
+  const d = S.data;
+  const list = d.tasks.filter((t) => t.section === 'rappel' && t.status === 'todo').sort((a, b) => (a.start_min ?? 9999) - (b.start_min ?? 9999) || a.sort - b.sort);
+  if (!list.length) return toast('Personne à rappeler.');
+  let i = 0;
+  const finish = async () => {
+    await guard(() => api('focus/stop', { method: 'POST' }));
+    closeModal();
+    load();
+  };
+  const show = async () => {
+    if (i >= list.length) return finish();
+    const t = list[i];
+    await guard(() => api('focus', { method: 'POST', body: { task_id: t.id, toggle: false } }));
+    const digits = (t.phone || '').replace(/[^\d+]/g, '');
+    const m = openModal(`
+      <p class="step">Mode appels · ${i + 1} sur ${list.length}</p>
+      <div class="card"><i class="dot c-${t.company}"></i><div><strong>${esc(t.contact || t.title)}</strong>
+        <small>${esc(t.contact ? t.title : COMPANIES[t.company])}${t.note ? ` · ${esc(t.note)}` : ''}${t.pushed_count ? ` · attend depuis ${t.pushed_count} jour${t.pushed_count > 1 ? 's' : ''}` : ''}</small></div></div>
+      ${digits ? `<a class="btn primary call" href="tel:${esc(digits)}">Appeler le ${esc(t.phone)}</a>` : `<p class="hint">Aucun numéro enregistré pour cette personne. Tu peux l'ajouter avec ⋯ sur la tâche.</p>`}
+      <div class="choices">
+        <button class="btn" data-do="joined">Rejoint</button>
+        <button class="btn ghost" data-do="message">Message laissé</button>
+        <button class="btn ghost" data-do="tomorrow">Rappeler demain</button>
+      </div>
+      <div class="foot"><button class="btn ghost" data-do="skip">Passer</button><span class="grow"></span><button class="btn ghost" data-do="end">Terminer</button></div>`);
+    m.addEventListener('click', async (e) => {
+      const act = e.target.closest('[data-do]')?.dataset.do;
+      if (!act) return;
+      if (act === 'end') return finish();
+      if (act === 'joined') await guard(() => api(`tasks/${t.id}`, { method: 'PATCH', body: { status: 'done' } }));
+      if (act === 'message') {
+        const now = new Date();
+        await guard(() => api(`tasks/${t.id}`, { method: 'PATCH', body: { note: `Message laissé à ${fmtTime(now.getHours() * 60 + now.getMinutes())}` } }));
+      }
+      if (act === 'tomorrow') await guard(() => api('triage', { method: 'POST', body: { decisions: [{ id: t.id, action: 'report' }], to: addDays(d.today, 1) } }));
+      i++;
+      show();
+    });
+  };
+  show();
+}
+
+// Les notifications sur cet appareil
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const keyBytes = (b64) => Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+
+async function pushState() {
+  if (!S.data.push.ready) return 'server';
+  if (!pushSupported()) return 'unsupported';
+  if (Notification.permission === 'denied') return 'denied';
+  const reg = await navigator.serviceWorker.ready;
+  return (await reg.pushManager.getSubscription()) ? 'on' : 'off';
+}
+
+async function enablePush() {
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') throw new Error('Les notifications sont refusées sur cet appareil. Autorise-les dans les réglages.');
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(S.data.push.public_key) });
+  await api('push/subscribe', { method: 'POST', body: { subscription: sub.toJSON() } });
+}
+
+async function disablePush() {
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  if (!sub) return;
+  await api('push/unsubscribe', { method: 'POST', body: { endpoint: sub.endpoint } });
+  await sub.unsubscribe();
+}
+
 // Réglages
 async function openSettings() {
   const d = S.data;
@@ -637,19 +808,71 @@ async function openSettings() {
     : d.calendar.error
       ? `<p class="hint warn">${esc(d.calendar.error)}</p><button class="btn ghost" data-do="cals">Choisir le calendrier</button>`
       : `<p>Branché sur « ${esc(d.calendar.name || 'ton calendrier')} ». Tes rendez-vous entrent, tes blocs y sont écrits avec une alerte.</p><button class="btn ghost" data-do="cals">Choisir un autre calendrier</button>`;
+  const n = d.notif;
+  const tick = (id, label, on) => `<label class="check"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span>${label}</span></label>`;
   const m = openModal(
     `<h2>Réglages</h2>
+
+     <h3>Notifications</h3>
+     <div id="push-box"><p class="hint">Vérification…</p></div>
+     ${tick('n-start', "À l'heure prévue d'une tâche ou d'un bloc d'appels", n.notif_start)}
+     ${tick('n-over', 'Tu dépasses : 20 minutes après la fin prévue', n.notif_over)}
+     ${tick('n-due', 'Échéances : trois jours avant, puis le matin même', n.notif_due)}
+     ${tick('n-eve', 'Préparer demain, le soir', n.notif_evening)}
+     <label class="field half"><span>Heure du rappel du soir</span><input type="time" id="n-evetime" step="300" value="${toTimeInput(n.evening_min)}"></label>
+
+     <h3>Ce qui revient</h3>
+     <p class="hint">Paies, taxes, renouvellements. Tu l'entres une fois : la tâche revient une semaine avant son échéance et monte dans tes priorités trois jours avant.</p>
+     <div id="rec-list"><p class="hint">Chargement…</p></div>
+     <div class="rec-form">
+       <input id="r-title" placeholder="Ex. Remettre la TPS et la TVQ" aria-label="Ce qui revient">
+       <div class="field two"><label><span>Revient</span><select id="r-every"><option value="week">Chaque semaine</option><option value="month" selected>Chaque mois</option><option value="quarter">Tous les 3 mois</option><option value="year">Chaque année</option></select></label>
+         <label><span>Prochaine échéance</span><input type="date" id="r-due" min="${d.today}"></label></div>
+       ${chips('r-company', Object.entries(COMPANIES).map(([k, v]) => [k, `<i class="dot c-${k}"></i>${v}`]), 'robiii')}
+       <button class="btn ghost" data-do="rec-add">Ajouter</button>
+     </div>
+
+     <h3>Hors feuille, sur ton Mac</h3>
+     <p>${d.off.active ? `L'assistant a rapporté de l'activité aujourd'hui, pour la dernière fois à ${fmtTime(d.off.last_seen)}.` : "L'assistant du Mac n'a rien rapporté aujourd'hui."}</p>
+     <label class="field half"><span>Budget hors feuille par jour</span><select id="s-budget">${[30, 45, 60, 90, 120].map((v) => `<option value="${v}"${v === d.off.budget ? ' selected' : ''}>${fmtDur(v)}</option>`).join('')}</select></label>
+     <p class="hint">Pour installer l'assistant, sur ton Mac, dans le dossier <code>pro</code> : <code>npm run assistant:install</code>. Il te demandera ton lien privé.</p>
+
      <h3>Calendrier</h3>${cal}<div id="cals"></div>
+
      <h3>Souper</h3>
      <div class="field two"><label><span>Heure</span><input type="time" id="s-sup" step="300" value="${toTimeInput(d.settings.supper_start)}"></label>
-       <label><span>Durée</span><select id="s-supmin">${[30, 45, 60, 90].map((n) => `<option value="${n}"${n === d.settings.supper_min ? ' selected' : ''}>${fmtDur(n)}</option>`).join('')}</select></label></div>
+       <label><span>Durée</span><select id="s-supmin">${[30, 45, 60, 90].map((v) => `<option value="${v}"${v === d.settings.supper_min ? ' selected' : ''}>${fmtDur(v)}</option>`).join('')}</select></label></div>
+
+     <h3>Ta semaine</h3>
+     <button class="btn ghost" data-do="mirror">Voir le miroir de la semaine</button>
+
      <h3>Dicter sans ouvrir l'app</h3>
      <p class="hint">Dans l'app Raccourcis de ton iPhone : « Dicter du texte », puis « Obtenir le contenu de l'URL » en méthode POST, corps JSON avec la clé <code>text</code>. Adresse à utiliser :</p>
      <div class="copy"><code id="inbox-url">${esc(inboxUrl)}</code><button class="btn ghost" data-do="copy">Copier</button></div>
      <p class="hint">Cette adresse contient ton lien privé. Ne la partage pas.</p>
-     <div class="foot"><button class="btn ghost" data-act="close">Fermer</button><span class="grow"></span><button class="btn" data-do="save">Enregistrer</button></div>`,
+     <div class="foot sticky"><button class="btn ghost" data-act="close">Fermer</button><span class="grow"></span><button class="btn primary" data-do="save">Enregistrer</button></div>`,
     { wide: true },
   );
+
+  const drawPush = async () => {
+    const st = await pushState().catch(() => 'unsupported');
+    $('#push-box', m).innerHTML = {
+      server: `<p class="hint">Les notifications ne sont pas encore configurées sur le serveur. Elles le seront à la prochaine installation (<code>npm run setup</code>).</p>`,
+      unsupported: `<p class="hint">Cet appareil ne peut pas recevoir de notifications ici. Sur iPhone, ajoute d'abord Pro à l'écran d'accueil, puis ouvre-la de là.</p>`,
+      denied: `<p class="hint warn">Les notifications sont bloquées pour Pro dans les réglages de cet appareil.</p>`,
+      on: `<p><strong>Activées sur cet appareil.</strong></p><div class="foot"><button class="btn ghost" data-do="push-test">Envoyer un essai</button><button class="btn ghost" data-do="push-off">Désactiver ici</button></div>`,
+      off: `<button class="btn" data-do="push-on">Activer sur cet appareil</button>`,
+    }[st];
+  };
+  const drawRec = async () => {
+    const res = await guard(() => api('recurring'));
+    $('#rec-list', m).innerHTML = res?.rules?.length
+      ? res.rules.map((r) => `<div class="rec" data-rec="${r.id}"><i class="dot c-${r.company}"></i><span><strong>${esc(r.title)}</strong><small>${esc(res.every[r.every])} · prochaine échéance ${esc(dayLabel(r.next_due).toLowerCase())}</small></span><button class="cx" data-do="rec-del" aria-label="Retirer">✕</button></div>`).join('')
+      : '<p class="empty">Rien pour l’instant.</p>';
+  };
+  drawPush();
+  drawRec();
+
   m.addEventListener('click', async (e) => {
     const act = e.target.closest('[data-do]')?.dataset.do;
     if (act === 'copy') {
@@ -659,6 +882,27 @@ async function openSettings() {
       } catch {
         getSelection().selectAllChildren($('#inbox-url', m));
       }
+    } else if (act === 'push-on') {
+      await guard(enablePush);
+      drawPush();
+    } else if (act === 'push-off') {
+      await guard(disablePush);
+      drawPush();
+    } else if (act === 'push-test') {
+      const res = await guard(() => api('push/test', { method: 'POST' }));
+      if (res) toast(res.sent ? 'Essai envoyé. Il devrait arriver dans quelques secondes.' : "L'essai n'a pas pu être envoyé.");
+    } else if (act === 'rec-add') {
+      const body = { title: $('#r-title', m).value, every: $('#r-every', m).value, next_due: $('#r-due', m).value, company: chipValue(m, 'r-company') };
+      if (await guard(() => api('recurring', { method: 'POST', body }))) {
+        $('#r-title', m).value = '';
+        drawRec();
+      }
+    } else if (act === 'rec-del') {
+      await guard(() => api(`recurring/${e.target.closest('[data-rec]').dataset.rec}`, { method: 'DELETE' }));
+      drawRec();
+    } else if (act === 'mirror') {
+      closeModal();
+      openMirror();
     } else if (act === 'cals') {
       const res = await guard(() => api('calendars'));
       $('#cals', m).innerHTML = res?.calendars?.length
@@ -670,7 +914,22 @@ async function openSettings() {
       closeModal();
       load(S.date, { fresh: true });
     } else if (act === 'save') {
-      await guard(() => api('settings', { method: 'PUT', body: { supper_start: fromTimeInput($('#s-sup', m).value) ?? 1080, supper_min: Number($('#s-supmin', m).value) } }));
+      const on = (id) => ($(id, m).checked ? 1 : 0);
+      await guard(() =>
+        api('settings', {
+          method: 'PUT',
+          body: {
+            supper_start: fromTimeInput($('#s-sup', m).value) ?? 1080,
+            supper_min: Number($('#s-supmin', m).value),
+            notif_start: on('#n-start'),
+            notif_over: on('#n-over'),
+            notif_due: on('#n-due'),
+            notif_evening: on('#n-eve'),
+            evening_min: fromTimeInput($('#n-evetime', m).value) ?? 1320,
+            off_budget: Number($('#s-budget', m).value),
+          },
+        }),
+      );
       await guard(() => api('plan', { method: 'POST', body: { date: S.date } }));
       closeModal();
       load();
@@ -783,6 +1042,21 @@ app.addEventListener('click', async (e) => {
   const d = S.data;
   if (act === 'check') return toggleCheck(id, row);
   if (act === 'edit') return openEdit(id);
+  if (act === 'focus') {
+    await guard(() => api('focus', { method: 'POST', body: { task_id: id } }));
+    return load();
+  }
+  if (act === 'stop') {
+    await guard(() => api('focus/stop', { method: 'POST' }));
+    return load();
+  }
+  if (act === 'imprevu') {
+    await guard(() => api('imprevu', { method: 'POST', body: {} }));
+    toast("Imprévu en cours. Touche « Fin de l'imprévu » quand c'est réglé.");
+    return load();
+  }
+  if (act === 'calls') return openCalls();
+  if (act === 'mirror') return openMirror();
   if (act === 'prev') return load(addDays(d.date, -1));
   if (act === 'next') return load(addDays(d.date, 1));
   if (act === 'today') return load(d.today);
@@ -806,7 +1080,7 @@ app.addEventListener('click', async (e) => {
 });
 
 app.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && e.target.matches('[data-act="edit"]')) e.target.click();
+  if (e.key === 'Enter' && e.target.matches('.t, .bt, .blk[data-act]')) e.target.click();
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && e.target.id === 'capture-text') $('#capture').requestSubmit();
 });
 app.addEventListener('input', (e) => e.target.id === 'capture-text' && autoGrow(e.target));

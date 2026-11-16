@@ -1,19 +1,33 @@
 # Pro
 
 Ta feuille du jour : priorités, personnes à rappeler, tâches à faire, ce que tu évites, et un horaire relié à ton calendrier.
-Étape 1 du plan de match. Une app web installable sur iPhone et Mac, hébergée sur Cloudflare.
+Une app web installable sur iPhone et Mac, hébergée sur Cloudflare, plus un petit assistant pour le Mac.
 
-## Ce que fait l'étape 1
+## Ce que fait Pro
 
-- **La feuille** : quatre sections, trois couleurs (orange Robiii, bleu ImmoMulti, vert perso), cocher raye la ligne et la descend en bas.
-- **Vider ta tête** : tu dictes ou écris tout d'un coup, l'outil sépare en tâches, tu confirmes le lot une fois.
-- **L'horaire** : tes tâches placées autour de tes rendez-vous, le souper à 18 h, le quart de la journée gardé libre.
-- **Le calendrier iCloud** : tes rendez-vous entrent, tes blocs y sont écrits avec une alerte.
-- **Le soir** : tu décides pour chaque tâche non faite, quatre questions pour ne rien oublier, tes heures du lendemain.
-- **La réserve** : ce qui n'a pas de jour, à revoir le dimanche.
-- **Dicter sans ouvrir l'app** : un raccourci iPhone envoie ta phrase, tu confirmes plus tard.
+**La feuille (étape 1)**
+- Quatre sections, trois couleurs (orange Robiii, bleu ImmoMulti, vert perso). Cocher raye la ligne et la descend en bas.
+- Vider ta tête : tu dictes ou écris tout d'un coup, l'outil sépare en tâches, tu confirmes le lot une fois.
+- L'horaire : tes tâches placées autour de tes rendez-vous, le souper à 18 h, le quart de la journée gardé libre. Les blocs se glissent.
+- Le calendrier iCloud : tes rendez-vous entrent, tes blocs y sont écrits avec une alerte. Des appels bout à bout ne sonnent qu'une fois.
+- Le soir : le bilan, le tri de chaque tâche non faite, quatre questions pour ne rien oublier, tes heures du lendemain.
+- La réserve : ce qui n'a pas de jour, à revoir le dimanche.
 
-Pas dans cette étape : notifications de Pro, temps réel, bouton Imprévu, mode appels, assistant du Mac.
+**Le temps réel et les notifications (étape 2)**
+- Un tap sur une tâche : « je suis là-dessus ». Le chrono suit, et un second tap le met en pause.
+- Le bouton Imprévu : la tâche en cours se met en pause, le temps de l'imprévu est compté à part, puis la tâche reprend.
+- Le mode appels : tes personnes à rappeler une à la fois, avec rejoint, message laissé ou rappeler demain.
+- Les notifications de Pro : à l'heure prévue, « tu dépasses », échéances, et le rappel du soir à 22 h. Chaque type se coupe dans ⚙.
+- Ce qui revient : paies, taxes, renouvellements. Tu l'entres une fois, la tâche revient avec sa vraie échéance.
+- Le bilan du soir : prévu contre fait, par type de travail. Après cinq tâches mesurées, Pro connaît ton rythme.
+
+**L'assistant du Mac (étape 3)**
+- Chaque minute, il note quelle app est au premier plan, et le site dans un navigateur. Rien d'autre : ni le contenu, ni ce que tu tapes.
+- Sans tâche en cours pendant 10 minutes, le temps passe « hors feuille ». YouTube, les réseaux sociaux et les nouvelles comptent toujours hors feuille.
+- Budget épuisé (60 minutes par défaut) : une fenêtre de rappel, avec trois choix. « Continuer quand même » fonctionne toujours et paraît au bilan.
+- Le miroir du dimanche : trois constats sur ta semaine, un seul ajustement.
+
+Pas encore bâti : déléguer une tâche, « En attente de », et les branchements au CRM, au Hub et à Gmail.
 
 ## Installer (une seule fois, sur ton Mac)
 
@@ -32,8 +46,19 @@ npm install
 npm run setup
 ```
 
-Le script te connecte à Cloudflare, crée la base, met Pro en ligne et affiche ton lien privé.
-Ouvre ce lien dans Safari sur ton iPhone, puis Partager, « Sur l'écran d'accueil ». Sur le Mac : Fichier, « Ajouter au Dock ».
+Le script te connecte à Cloudflare, crée la base, met Pro en ligne, fabrique les clés des notifications et affiche ton lien privé.
+
+Ensuite :
+
+1. Ouvre le lien dans Safari sur ton iPhone, puis Partager, « Sur l'écran d'accueil ». Sur le Mac : Fichier, « Ajouter au Dock ».
+2. Ouvre Pro **depuis l'icône** de l'écran d'accueil, puis ⚙, Notifications, « Activer sur cet appareil ». Sur iPhone, les notifications ne fonctionnent que dans l'app installée.
+3. Pour l'assistant du Mac :
+
+```bash
+npm run assistant:install
+```
+
+macOS te demandera d'autoriser l'assistant à connaître l'app au premier plan, puis le site ouvert dans ton navigateur. Pour le retirer : `npm run assistant:remove`.
 
 Le lien privé est gardé dans `.pro-lien` (hors du dépôt). Quiconque l'obtient voit tes tâches : ne le partage pas.
 Pour en changer : supprime `.pro-lien` et relance `npm run setup`.
@@ -50,7 +75,7 @@ npm install && npm run deploy
 
 ## Dicter sans ouvrir l'app (raccourci iPhone)
 
-Dans l'app Raccourcis, crée un raccourci avec deux actions :
+Le raccourci est à créer à la main, dans l'app Raccourcis, avec deux actions :
 
 1. **Dicter du texte**.
 2. **Obtenir le contenu de l'URL** : méthode POST, corps de requête JSON, un champ `text` qui reçoit le texte dicté.
@@ -85,17 +110,31 @@ npm test
 
 | Fichier | Rôle |
 |---|---|
-| `src/index.js` | Routes et lien privé (`/k/<clé>/`, 404 sans la clé) |
+| `src/index.js` | Routes, lien privé (`/k/<clé>/`, 404 sans la clé), horloge des notifications |
 | `public/plan.js` | Ordre de tri et placement à l'horaire, partagé par le serveur et l'app |
 | `src/parse.js`, `src/rules.js` | La dictée devient des tâches : Claude, puis règles de secours |
 | `src/caldav.js` | Lecture et écriture du calendrier iCloud (CalDAV) |
-| `public/app.js`, `public/styles.css` | L'écran |
+| `src/track.js` | Le chrono et l'imprévu |
+| `src/notify.js`, `src/push.js` | Quoi notifier et quand ; chiffrement et envoi (Web Push) |
+| `src/recurring.js` | Ce qui revient |
+| `src/bilan.js` | Bilan du soir, miroir de la semaine, budget hors feuille |
+| `assistant/` | L'assistant du Mac et son installation |
+| `public/app.js`, `public/styles.css`, `public/sw.js` | L'écran, et la réception des notifications |
 | `migrations/` | Les tables |
 | `scripts/setup.mjs` | Installation sur Cloudflare |
 | `test/` | Tests de la logique, et un parcours complet à l'écran (`parcours.e2e.cjs`, demande Playwright) |
 
 ## Ce qui a été vérifié, et ce qui ne l'a pas été
 
-Vérifié : 20 tests de logique, le parcours complet sur Mac et iPhone simulés, et le calendrier contre un serveur CalDAV d'essai (Radicale).
+Vérifié :
+- 32 tests de logique, dont le chiffrement des notifications contre le vecteur officiel de la RFC 8291.
+- Le parcours complet à l'écran, sur Mac et iPhone simulés : dictée, confirmation, cocher, glisser, chrono, imprévu, mode appels, bilan, tri du soir, réserve, ce qui revient.
+- La chaîne des notifications en local, de l'horloge jusqu'au message déchiffré par un faux appareil, sans doublon.
+- Le calendrier contre un serveur CalDAV d'essai (Radicale).
 
-Pas encore vérifié, faute d'accès : le vrai calendrier iCloud, un vrai appel à Claude avec une clé valide, et `npm run setup` sur un vrai compte Cloudflare.
+Pas encore vérifié, faute d'accès :
+- **L'assistant du Mac.** Il n'a jamais tourné : il est écrit pour macOS et a été développé sous Linux. Attends-toi à des ajustements au premier essai.
+- Une vraie notification reçue sur un iPhone ou un Mac.
+- Le vrai calendrier iCloud.
+- Un vrai appel à Claude avec une clé valide.
+- `npm run setup` sur un vrai compte Cloudflare.

@@ -8,7 +8,9 @@
     "test": "node --test \"test/*.test.mjs\"",
     "migrate:local": "node scripts/config.mjs && wrangler d1 migrations apply pro --local",
     "setup": "node scripts/setup.mjs",
-    "deploy": "node scripts/config.mjs --check && wrangler d1 migrations apply pro --remote && wrangler deploy"
+    "deploy": "node scripts/config.mjs --check && wrangler d1 migrations apply pro --remote && wrangler deploy",
+    "assistant:install": "node assistant/install.mjs",
+    "assistant:remove": "node assistant/install.mjs --remove"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",

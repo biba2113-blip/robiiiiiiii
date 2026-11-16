@@ -48,7 +48,7 @@ test('une liste sur plusieurs lignes', () => {
 
 test('le nettoyage refuse les valeurs inventées', () => {
   const t = sanitize({ title: '  Test  ', section: 'nimporte', company: 'x', nature: 'y', day: 'demain', due_date: '31 nov', est_minutes: 9999 }, CTX);
-  assert.deepEqual(t, { title: 'Test', section: 'faire', company: 'perso', nature: 'autre', day: '2026-11-16', due_date: null, est_minutes: 480, contact: null });
+  assert.deepEqual(t, { title: 'Test', section: 'faire', company: 'perso', nature: 'autre', day: '2026-11-16', due_date: null, est_minutes: 480, contact: null, phone: null });
   assert.equal(sanitize({ title: '' }, CTX), null);
   assert.equal(sanitize({ title: 'x', day: null }, CTX).day, null); // la réserve
   assert.equal(sanitize({ title: 'x', day: '2026-11-01' }, CTX).day, '2026-11-16'); // jamais dans le passé

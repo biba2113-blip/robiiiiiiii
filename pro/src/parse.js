@@ -20,6 +20,7 @@ const TaskList = z.object({
       due_date: z.string().nullable(),
       est_minutes: z.number(),
       contact: z.string().nullable(),
+      phone: z.string().nullable(),
     }),
   ),
 });
@@ -44,7 +45,8 @@ Pour chaque tâche :
 - day : le jour où la faire, AAAA-MM-JJ. S'il ne dit rien, mets ${defaultDay}. « un jour », « éventuellement », « quand j'aurai le temps » donnent null.
 - due_date : seulement s'il donne une vraie date limite (« avant vendredi », « pour le 30 »), AAAA-MM-JJ. Sinon null.
 - est_minutes : ton estimation réaliste, parmi 5, 10, 15, 30, 45, 60, 90, 120. Un appel vaut 10.
-- contact : le nom de la personne ou de l'entreprise à joindre pour un rappel, sinon null.`;
+- contact : le nom de la personne ou de l'entreprise à joindre pour un rappel, sinon null.
+- phone : le numéro de téléphone s'il le dicte, en chiffres, sinon null.`;
 }
 
 /** Compte les appels du mois et refuse au-delà du plafond de l'app. */
@@ -99,6 +101,7 @@ export function sanitize(t, { today, defaultDay }) {
     due_date: isDate(t.due_date) ? t.due_date : null,
     est_minutes: Math.min(480, Math.max(5, Math.round(Number(t.est_minutes) || 30))),
     contact: t.contact ? String(t.contact).trim().slice(0, 120) : null,
+    phone: t.phone && /\d{7,}/.test(String(t.phone).replace(/\D/g, '')) ? String(t.phone).trim().slice(0, 30) : null,
   };
 }
 

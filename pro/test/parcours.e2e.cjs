@@ -79,7 +79,7 @@ const URL = 'http://localhost:8790/k/dev/';
   for (let i = 1; i < todo.length; i++) assert.ok(todo[i].start_min >= todo[i - 1].start_min + todo[i - 1].est_minutes, 'aucun chevauchement après le déplacement');
 
   // 5. Modifier : durée et jour
-  await mac.locator('.box[data-drop="section:priorite"] .row .t').first().click();
+  await mac.locator('.box[data-drop="section:priorite"] .row .more').first().click();
   await mac.waitForSelector('.modal');
   await mac.waitForTimeout(380); await mac.screenshot({ path: SHOTS + '/4-modifier-mac.png' });
   await mac.click('[data-chips="dur"] [data-v="60"]');
@@ -88,14 +88,67 @@ const URL = 'http://localhost:8790/k/dev/';
   await mac.waitForTimeout(400);
   await mac.waitForTimeout(380); await mac.screenshot({ path: SHOTS + '/1-feuille-mac.png', fullPage: false });
 
+  // 5b. Le chrono : un tap sur une tâche, un imprévu, puis retour à la tâche
+  const focusRow = mac.locator('.box[data-drop="section:priorite"] .row:not(.done)').first();
+  const focusTitle = await focusRow.locator('.tt').textContent();
+  await focusRow.locator('.t').click();
+  await mac.waitForSelector('.nowbar');
+  assert.ok((await mac.locator('.nowbar').textContent()).includes(focusTitle), 'la barre « En cours » nomme la tâche');
+  assert.equal(await mac.locator('.row.current').count() >= 1, true);
+  await mac.click('[data-act="imprevu"]');
+  await mac.waitForSelector('.nowbar.imprevu');
+  await mac.waitForTimeout(380); await mac.screenshot({ path: SHOTS + '/13-imprevu-mac.png' });
+  await mac.click('[data-act="stop"]');
+  await mac.waitForSelector('.nowbar.task');
+  assert.ok((await mac.locator('.nowbar').textContent()).includes(focusTitle), "après l'imprévu, la tâche reprend toute seule");
+  await mac.waitForTimeout(380); await mac.screenshot({ path: SHOTS + '/14-en-cours-mac.png' });
+  await mac.click('[data-act="stop"]');
+  await mac.waitForSelector('.nowbar', { state: 'detached' });
+
+  // 5c. Réglages : notifications, ce qui revient
+  await mac.click('[data-act="settings"]');
+  await mac.waitForSelector('#rec-list');
+  await mac.fill('#r-title', 'Faire les paies');
+  await mac.selectOption('#r-every', 'week');
+  await mac.fill('#r-due', (await api(mac, 'sheet')).today);
+  await mac.click('[data-do="rec-add"]');
+  await mac.waitForSelector('.rec');
+  assert.match(await mac.locator('.rec').first().textContent(), /Faire les paies/);
+  await mac.waitForTimeout(380); await mac.screenshot({ path: SHOTS + '/15-reglages-mac.png' });
+  await mac.click('[data-act="close"]');
+  await mac.waitForSelector('.veil', { state: 'detached' });
+  await mac.reload({ waitUntil: 'networkidle' });
+  await mac.waitForSelector('.box');
+  assert.ok((await mac.locator('.box[data-drop="section:priorite"]').textContent()).includes('Faire les paies'), 'la tâche qui revient est dans les priorités');
+
   // --- iPhone ---
   const ph = await mk({ width: 390, height: 844 });
   await ph.waitForTimeout(380); await ph.screenshot({ path: SHOTS + '/5-feuille-iphone.png' });
   const order = await ph.evaluate(() => [...document.querySelectorAll('.grid .box h2')].map((h) => ({ t: h.firstChild.textContent.trim(), y: h.getBoundingClientRect().top })).sort((a, b) => a.y - b.y).map((x) => x.t));
   assert.deepEqual(order, ['Priorités', 'À rappeler', 'À faire', "Ce que j'évite", 'Horaire'], 'sur iPhone, les priorités d’abord');
 
-  // 6. Préparer demain : tri, questions, heures
+  // 5d. Mode appels : une personne à la fois
+  await ph.locator('.box[data-drop="section:rappel"] [data-act="calls"]').click();
+  await ph.waitForSelector('.choices');
+  await ph.waitForTimeout(380); await ph.screenshot({ path: SHOTS + '/16-appels-iphone.png' });
+  const callsBefore = (await api(ph, 'sheet')).tasks.filter((t) => t.section === 'rappel' && t.status === 'todo').length;
+  await ph.click('[data-do="joined"]');
+  await ph.waitForFunction(() => /2 sur/.test(document.querySelector('.step')?.textContent || ''));
+  await ph.click('[data-do="message"]');
+  await ph.waitForTimeout(300);
+  await ph.click('[data-do="end"]');
+  await ph.waitForSelector('.veil', { state: 'detached' });
+  const afterCalls = await api(ph, 'sheet');
+  assert.equal(afterCalls.tasks.filter((t) => t.section === 'rappel' && t.status === 'todo').length, callsBefore - 1, 'un appel rejoint est coché');
+  assert.ok(afterCalls.tasks.some((t) => /^Message laissé à /.test(t.note || '')), 'le message laissé est noté');
+  assert.equal(afterCalls.focus, null, 'le chrono est arrêté en sortant du mode appels');
+
+  // 6. Préparer demain : bilan, tri, questions, heures
+  const reserveBefore = afterCalls.reserve_count; // la tâche « qui revient » de la semaine prochaine y est déjà
   await ph.click('[data-act="evening"]');
+  await ph.waitForSelector('.bilan');
+  await ph.waitForTimeout(380); await ph.screenshot({ path: SHOTS + '/17-bilan-iphone.png' });
+  await ph.click('[data-do="next"]');
   await ph.waitForSelector('.choices');
   await ph.waitForTimeout(380); await ph.screenshot({ path: SHOTS + '/6-tri-iphone.png' });
   const total = Number((await ph.locator('.step').textContent()).match(/sur (\d+)/)[1]);
@@ -129,7 +182,7 @@ const URL = 'http://localhost:8790/k/dev/';
   assert.ok(tom.tasks.some((t) => /notaire/i.test(t.title)), 'les réponses aux questions sont sur la feuille de demain');
   const today2 = await api(ph, 'sheet');
   assert.equal(today2.tasks.filter((t) => t.status === 'todo').length, 0, 'plus rien à faire aujourd’hui après le tri');
-  assert.equal(today2.reserve_count, 1, 'une tâche est partie dans la réserve');
+  assert.equal(today2.reserve_count, reserveBefore + 1, 'une tâche est partie dans la réserve');
 
   // 7. La réserve
   await ph.click('[data-act="reserve"]');

@@ -3,6 +3,11 @@ import { place, DEFAULTS } from '../public/plan.js';
 import { toLocal, addDays, dow, nowIso } from './time.js';
 import { parseDump, firstStep, sanitize } from './parse.js';
 import { configured, eventsFor, syncTasks, listCalendars } from './caldav.js';
+import { current, focus, stop, imprevu, onTaskClosed, minutesFor } from './track.js';
+import { runNotifications, NOTIF_DEFAULTS } from './notify.js';
+import { broadcast, pushReady } from './push.js';
+import { generate, EVERY } from './recurring.js';
+import { bilan, mirror, recordActivity, offSummary, pace, OFF_DEFAULTS } from './bilan.js';
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -28,11 +33,11 @@ const all = async (env, sql, ...binds) => (await env.DB.prepare(sql).bind(...bin
 const first = (env, sql, ...binds) => env.DB.prepare(sql).bind(...binds).first();
 const run = (env, sql, ...binds) => env.DB.prepare(sql).bind(...binds).run();
 
-const SETTING_KEYS = ['supper_start', 'supper_min', 'buffer_pct', 'cal_url', 'cal_name'];
+const SETTING_KEYS = ['supper_start', 'supper_min', 'buffer_pct', 'cal_url', 'cal_name', 'notif_start', 'notif_over', 'notif_due', 'notif_evening', 'evening_min', 'off_budget'];
 
 async function getSettings(env) {
   const rows = await all(env, `SELECT key, value FROM settings WHERE key IN (${SETTING_KEYS.map(() => '?').join(',')})`, ...SETTING_KEYS);
-  const s = { ...DEFAULTS };
+  const s = { ...DEFAULTS, ...NOTIF_DEFAULTS, ...OFF_DEFAULTS };
   for (const r of rows) s[r.key] = ['cal_url', 'cal_name'].includes(r.key) ? r.value : Number(r.value);
   return s;
 }
@@ -61,6 +66,7 @@ async function sheet(env, date, { fresh = false } = {}) {
 
   // Une échéance dans trois jours ou moins monte toute seule dans les priorités.
   // Une tâche de la réserve arrive sur aujourd'hui ; une tâche déjà placée sur un jour y reste.
+  await generate(env, today); // ce qui revient : crée les tâches dont l'échéance approche
   const soon = addDays(today, 3);
   await env.DB.batch([
     env.DB.prepare(
@@ -76,6 +82,7 @@ async function sheet(env, date, { fresh = false } = {}) {
   const inbox = await all(env, "SELECT id, raw_text, created_at FROM captures WHERE source = 'raccourci' AND confirmed_at IS NULL ORDER BY id");
   const summary = place(tasks, day, cal.events, settings, { today });
   const lastError = await first(env, "SELECT value FROM settings WHERE key = 'cal_last_error'");
+  const track = await minutesFor(env, date);
 
   return {
     today,
@@ -97,6 +104,16 @@ async function sheet(env, date, { fresh = false } = {}) {
     inbox,
     summary: { planned: summary.planned, capacity: summary.capacity, available: summary.available, overflow: summary.overflow },
     ai: Boolean(env.ANTHROPIC_API_KEY),
+    focus: await current(env),
+    tracked: track.byTask,
+    imprevu_min: track.imprevu,
+    pace: await pace(env),
+    off: await offSummary(env, date),
+    push: { ready: pushReady(env), public_key: env.VAPID_PUBLIC || null },
+    notif: {
+      notif_start: settings.notif_start, notif_over: settings.notif_over, notif_due: settings.notif_due,
+      notif_evening: settings.notif_evening, evening_min: settings.evening_min,
+    },
   };
 }
 
@@ -127,9 +144,9 @@ async function createTasks(env, ctx, items, { source = 'manuel', captureId = nul
   const stamp = Date.now();
   const stmts = clean.map((t, i) =>
     env.DB.prepare(
-      `INSERT INTO tasks (title, section, company, nature, day, due_date, est_minutes, contact, sort, source, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(t.title, t.section, t.company, t.nature, t.day, t.due_date, t.est_minutes, t.contact, stamp + i, source, nowIso()),
+      `INSERT INTO tasks (title, section, company, nature, day, due_date, est_minutes, contact, phone, sort, source, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(t.title, t.section, t.company, t.nature, t.day, t.due_date, t.est_minutes, t.contact, t.phone, stamp + i, source, nowIso()),
   );
   if (stmts.length) await env.DB.batch(stmts);
   if (captureId) await run(env, 'UPDATE captures SET confirmed_at = ? WHERE id = ?', nowIso(), captureId);
@@ -137,7 +154,7 @@ async function createTasks(env, ctx, items, { source = 'manuel', captureId = nul
   return clean.length;
 }
 
-const EDITABLE = ['title', 'section', 'company', 'nature', 'day', 'due_date', 'est_minutes', 'start_min', 'status', 'contact', 'first_step', 'sort'];
+const EDITABLE = ['title', 'section', 'company', 'nature', 'day', 'due_date', 'est_minutes', 'start_min', 'status', 'contact', 'phone', 'note', 'first_step', 'sort'];
 
 async function patchTask(env, ctx, id, body) {
   const old = await first(env, 'SELECT * FROM tasks WHERE id = ?', id);
@@ -161,6 +178,8 @@ async function patchTask(env, ctx, id, body) {
 
   if (set.section === 'rappel' && (set.nature ?? old.nature) === 'autre') set.nature = 'attend';
   if ('status' in set) set.done_at = set.status === 'done' ? nowIso() : null;
+  if (set.status === 'done' || set.status === 'deleted') await onTaskClosed(env, id); // arrête son chrono
+  for (const k of ['phone', 'note', 'contact']) if (k in set) set[k] = set[k] ? String(set[k]).trim().slice(0, 160) : null;
   if ('start_min' in set) {
     if (set.start_min === null) set.pinned = 0;
     else {
@@ -335,9 +354,79 @@ async function api(req, env, ctx, path, url) {
     for (const k of SETTING_KEYS) {
       if (!(k in body)) continue;
       const v = ['cal_url', 'cal_name'].includes(k) ? String(body[k]).slice(0, 500) : String(Math.round(Number(body[k]) || 0));
+      if (k === 'off_budget' && (Number(v) < 5 || Number(v) > 480)) continue;
       await run(env, 'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', k, v);
     }
     if ('cal_url' in body) await run(env, "DELETE FROM settings WHERE key LIKE 'cal_cache_%'");
+    return json({ ok: true });
+  }
+
+  // ---- Étape 2 : le chrono ----
+  if (path === 'focus' && m === 'POST') {
+    await focus(env, Number(body.task_id), { toggle: body.toggle !== false });
+    return json({ focus: await current(env) });
+  }
+  if (path === 'focus/stop' && m === 'POST') {
+    await stop(env);
+    return json({ focus: await current(env) });
+  }
+  if (path === 'imprevu' && m === 'POST') {
+    await imprevu(env, body.label);
+    return json({ focus: await current(env) });
+  }
+
+  if (path === 'bilan' && m === 'GET') {
+    const date = isDate(url.searchParams.get('date')) ? url.searchParams.get('date') : today;
+    const settings = await getSettings(env);
+    const [day, cal] = await Promise.all([getDay(env, date, settings), eventsFor(env, date)]);
+    return json(await bilan(env, date, { day, events: cal.events, settings }));
+  }
+  if (path === 'mirror' && m === 'GET') return json(await mirror(env, today));
+
+  // ---- Ce qui revient ----
+  if (path === 'recurring' && m === 'GET') {
+    return json({ rules: await all(env, 'SELECT * FROM recurring WHERE active = 1 ORDER BY next_due'), every: EVERY });
+  }
+  if (path === 'recurring' && m === 'POST') {
+    const title = String(body.title || '').trim().slice(0, 200);
+    if (!title || !isDate(body.next_due) || !(body.every in EVERY)) return bad('Il manque le titre, la fréquence ou la prochaine échéance');
+    const company = ['robiii', 'immo', 'perso'].includes(body.company) ? body.company : 'perso';
+    const est = Math.min(480, Math.max(5, Math.round(Number(body.est_minutes) || 30)));
+    await run(env, 'INSERT INTO recurring (title, company, est_minutes, every, next_due, created_at) VALUES (?, ?, ?, ?, ?, ?)', title, company, est, body.every, body.next_due, nowIso());
+    await generate(env, today);
+    return json({ ok: true }, 201);
+  }
+  if ((r = path.match(/^recurring\/(\d+)$/)) && m === 'DELETE') {
+    await run(env, 'UPDATE recurring SET active = 0 WHERE id = ?', Number(r[1]));
+    return json({ ok: true });
+  }
+
+  // ---- Notifications ----
+  if (path === 'push/subscribe' && m === 'POST') {
+    const sub = body.subscription || {};
+    const okUrl = /^https:\/\//.test(sub.endpoint || '') || (env.ACCESS_KEY === 'dev' && /^http:\/\/127\.0\.0\.1:/.test(sub.endpoint || '')); // http seulement pour les tests locaux
+    if (!okUrl || !sub.keys?.p256dh || !sub.keys?.auth) return bad('Abonnement incomplet');
+    await run(env, 'INSERT INTO push_subs (endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth',
+      sub.endpoint, sub.keys.p256dh, sub.keys.auth, nowIso());
+    return json({ ok: true });
+  }
+  if (path === 'push/unsubscribe' && m === 'POST') {
+    await run(env, 'DELETE FROM push_subs WHERE endpoint = ?', String(body.endpoint || ''));
+    return json({ ok: true });
+  }
+  if (path === 'push/test' && m === 'POST') {
+    if (!pushReady(env)) return bad('Les notifications ne sont pas configurées sur le serveur');
+    return json(await broadcast(env, { title: 'Pro', body: 'Les notifications fonctionnent sur cet appareil.', tag: 'essai' }));
+  }
+
+  // ---- Étape 3 : l'assistant du Mac ----
+  if (path === 'activity' && m === 'POST') {
+    return json(await recordActivity(env, { app: body.app, site: body.site, inPro: Boolean(body.in_pro) }));
+  }
+  if (path === 'assistant/event' && m === 'POST') {
+    const kind = { stop: 'assistant_stop', start: 'assistant_start', override: 'override' }[body.kind];
+    if (!kind) return bad('Événement inconnu');
+    await run(env, 'INSERT INTO journal (day, at, kind, detail) VALUES (?, ?, ?, ?)', today, Date.now(), kind, String(body.detail || '').slice(0, 120));
     return json({ ok: true });
   }
 
@@ -366,6 +455,11 @@ function manifest() {
 }
 
 export default {
+  /** Chaque minute : envoyer les notifications dues. */
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runNotifications(env).catch((err) => console.error('notifications', err)));
+  },
+
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
     // Sans clé d'accès configurée, rien n'est servi : l'app n'est jamais ouverte par défaut.
