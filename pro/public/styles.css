@@ -130,6 +130,12 @@ small { display: block; color: var(--muted); font-size: 0.8rem; font-weight: 400
 .send { margin-right: auto; border: 0; border-radius: 99px; background: var(--accent); color: #fff; font-weight: 700; padding: 0 20px; height: 48px; white-space: nowrap; }
 @media (prefers-color-scheme: dark) { .send { color: #0e1020; } }
 .send:disabled { opacity: 0.6; }
+.mic { flex: none; width: 48px; height: 48px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface); color: var(--accent); display: grid; place-items: center; box-shadow: 0 6px 24px rgba(10, 14, 40, 0.08); }
+.mic.rec { width: auto; display: flex; gap: 8px; align-items: center; padding: 0 16px; background: var(--warn); border-color: var(--warn); color: #fff; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mic.rec i { width: 12px; height: 12px; border-radius: 3px; background: currentColor; animation: pulse 1.2s ease-in-out infinite; }
+@media (max-width: 519px) { .capture.is-rec .send { display: none; } .capture.is-rec .mic { margin-right: auto; } }
+.mic.busy { color: var(--muted); font-weight: 700; font-size: 1.2rem; }
+@media (prefers-color-scheme: dark) { .mic.rec { color: #0e1020; } }
 
 /* Fenêtres */
 .veil { position: fixed; inset: 0; z-index: 40; background: rgba(10, 12, 30, 0.5); display: flex; align-items: flex-end; justify-content: center; padding: 0; }

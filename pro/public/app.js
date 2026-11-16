@@ -301,13 +301,127 @@ function render() {
       ${scheduleHtml()}
       <div class="boxes">${boxHtml('priorite', by('priorite'))}${boxHtml('rappel', by('rappel'))}${boxHtml('faire', by('faire'))}${avoidHtml(tasks)}</div>
     </main>
-    <form class="capture" id="capture">
-      <textarea id="capture-text" rows="1" placeholder="Vide ta tête : dicte ou écris tout d'un coup…" aria-label="Ajouter des tâches"></textarea>
+    <form class="capture${mic.state === 'idle' ? '' : ' is-rec'}" id="capture">
+      <textarea id="capture-text" rows="1" placeholder="${capturePlaceholder()}" aria-label="Ajouter des tâches"></textarea>
+      ${micHtml()}
       <button class="send" type="submit" aria-label="Ajouter">Ajouter</button>
     </form>`;
   const ta = $('#capture-text');
   ta.value = keep;
   autoGrow(ta);
+}
+
+// ---- Le micro : tu appuies, tu parles, tu appuies encore. Le texte part se faire classer. ----
+
+const MIC_MAX_MS = 5 * 60000; // un enregistrement oublié s'arrête seul après 5 minutes
+const MIC_TYPES = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'];
+const MIC_ICON = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 0 0-7 0v6A3.5 3.5 0 0 0 12 15Z"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>`;
+let mic = { state: 'idle' };
+
+const micSupported = () => Boolean(S.data?.mic && navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+const micClock = () => {
+  const s = Math.floor((Date.now() - mic.started) / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+
+function micHtml() {
+  if (!micSupported()) return '';
+  if (mic.state === 'rec')
+    return `<button class="mic rec" type="button" data-act="mic" aria-label="Arrêter et transcrire"><i></i><span class="mic-time">${micClock()}</span></button>`;
+  if (mic.state === 'busy') return `<button class="mic busy" type="button" disabled aria-label="Transcription en cours">…</button>`;
+  return `<button class="mic" type="button" data-act="mic" aria-label="Dicter">${MIC_ICON}</button>`;
+}
+// Sur un petit écran, la boîte est étroite : un texte court, et le bouton « Ajouter » s'efface pendant qu'on dicte.
+const capturePlaceholder = () =>
+  mic.state === 'rec' ? 'Je t’écoute…' : mic.state === 'busy' ? 'Je transcris…' : innerWidth < 520 ? 'Vide ta tête…' : "Vide ta tête : dicte ou écris tout d'un coup…";
+function paintMic() {
+  const el = $('.mic');
+  if (el) el.outerHTML = micHtml();
+  $('#capture')?.classList.toggle('is-rec', mic.state !== 'idle');
+  const ta = $('#capture-text');
+  if (ta) ta.placeholder = capturePlaceholder();
+}
+function resetMic() {
+  clearInterval(mic.tick);
+  clearTimeout(mic.limit);
+  mic.stream?.getTracks().forEach((t) => t.stop());
+  mic = { state: 'idle' };
+  paintMic();
+}
+
+async function startMic() {
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+  } catch (err) {
+    const denied = err?.name === 'NotAllowedError' || err?.name === 'SecurityError';
+    return toast(denied ? 'Autorise le micro pour Pro dans les réglages de ton appareil.' : 'Aucun micro trouvé sur cet appareil.', 4500);
+  }
+  const type = MIC_TYPES.find((t) => MediaRecorder.isTypeSupported(t));
+  let recorder;
+  try {
+    recorder = new MediaRecorder(stream, { ...(type ? { mimeType: type } : {}), audioBitsPerSecond: 48000 });
+  } catch {
+    stream.getTracks().forEach((t) => t.stop());
+    return toast('Cet appareil ne peut pas enregistrer ici. Sers-toi du micro du clavier.', 4500);
+  }
+  const chunks = [];
+  recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  recorder.onstop = () => finishMic(chunks, recorder.mimeType || type || 'audio/mp4');
+  recorder.onerror = () => stopMic();
+  recorder.start();
+  mic = {
+    state: 'rec',
+    recorder,
+    stream,
+    started: Date.now(),
+    tick: setInterval(() => {
+      const el = $('.mic-time');
+      if (el) el.textContent = micClock();
+    }, 500),
+    limit: setTimeout(stopMic, MIC_MAX_MS),
+  };
+  paintMic();
+}
+
+function stopMic() {
+  if (mic.state !== 'rec') return;
+  clearInterval(mic.tick);
+  clearTimeout(mic.limit);
+  mic.state = 'busy';
+  paintMic();
+  try {
+    mic.recorder.stop(); // la suite se passe dans finishMic
+  } catch {
+    resetMic();
+  }
+}
+
+async function finishMic(chunks, type) {
+  const seconds = (Date.now() - mic.started) / 1000;
+  mic.stream?.getTracks().forEach((t) => t.stop());
+  const blob = new Blob(chunks, { type });
+  if (seconds < 1 || blob.size < 600) {
+    resetMic();
+    return toast('Trop court. Appuie, parle, puis appuie encore pour finir.', 4000);
+  }
+  let data;
+  try {
+    const res = await fetch('api/transcribe', { method: 'POST', headers: { 'Content-Type': type.split(';')[0] }, body: blob });
+    data = await res.json().catch(() => ({}));
+    if (!res.ok) data = { error: data.error || `Le serveur a répondu ${res.status}` };
+  } catch {
+    data = { error: 'Pas de réseau : la dictée n’a pas pu partir. Réessaie.' };
+  }
+  resetMic();
+  if (data.error) return toast(data.error, 4500);
+  if (!data.text) return toast("Je n'ai rien entendu. Réessaie plus près du micro.", 4000);
+  const ta = $('#capture-text');
+  if (!ta) return;
+  ta.value = (ta.value.trim() ? ta.value.trim() + ' ' : '') + data.text;
+  autoGrow(ta);
+  // Le texte part tout de suite se faire classer ; tu confirmes ou corriges à l'écran suivant.
+  if (!modalRoot.firstChild && !S.busy) $('#capture').requestSubmit();
 }
 
 // Le chrono de la barre « En cours » avance sans recharger la feuille.
@@ -324,15 +438,24 @@ function autoGrow(ta) {
 // ---- Fenêtres ----
 
 function openModal(html, { wide = false } = {}) {
+  const replaced = onModalClose; // une fenêtre remplacée par une autre compte comme fermée
+  onModalClose = null;
+  replaced?.();
   modalRoot.innerHTML = `<div class="veil" data-act="close-veil"><div class="modal${wide ? ' wide' : ''}" role="dialog" aria-modal="true">${html}</div></div>`;
   document.body.classList.add('locked');
   const focus = $('.modal [autofocus]', modalRoot);
   if (focus) focus.focus();
   return $('.modal', modalRoot);
 }
+// Une fenêtre peut se fermer de trois façons : ses boutons, Échap, ou un tap à côté.
+// Celle qui attend une réponse l'apprend ici, sinon elle attendrait pour toujours.
+let onModalClose = null;
 function closeModal() {
+  const done = onModalClose;
+  onModalClose = null;
   modalRoot.innerHTML = '';
   document.body.classList.remove('locked');
+  done?.();
 }
 
 const chips = (name, options, value) =>
@@ -448,6 +571,7 @@ function openConfirm(parsed, { said } = {}) {
        <div class="foot sticky"><button class="btn ghost" data-do="cancel">Annuler</button><span class="grow"></span><button class="btn primary" data-do="add" autofocus></button></div>`,
       { wide: true },
     );
+    onModalClose = () => resolve(0); // fermée sans réponse : rien n'est ajouté
     const addBtn = $('[data-do="add"]', m);
     const alive = () => items.filter(Boolean);
     const draw = () => {
@@ -487,15 +611,12 @@ function openConfirm(parsed, { said } = {}) {
         return draw();
       }
       const act = e.target.closest('[data-do]')?.dataset.do;
-      if (act === 'cancel') {
-        closeModal();
-        return resolve(0);
-      }
+      if (act === 'cancel') return closeModal();
       if (act === 'add') {
         addBtn.disabled = true;
         const res = await guard(() => api('tasks', { method: 'POST', body: { items: alive(), capture_id: parsed.capture_id, source: 'dictee' } }));
-        closeModal();
         resolve(res ? res.created : 0);
+        closeModal();
       }
     });
   });
@@ -678,7 +799,10 @@ async function openInbox() {
     if (!n) {
       const m = openModal(`<h2>Garder cette dictée pour plus tard ?</h2><p class="said">« ${esc(cap.raw_text.slice(0, 220))} »</p>
         <div class="foot"><button class="btn danger" data-do="drop">La jeter</button><span class="grow"></span><button class="btn" data-do="keep" autofocus>La garder</button></div>`);
-      const choice = await new Promise((r) => m.addEventListener('click', (e) => e.target.dataset.do && r(e.target.dataset.do)));
+      const choice = await new Promise((r) => {
+        onModalClose = () => r('keep'); // fermée sans choisir : on la garde
+        m.addEventListener('click', (e) => e.target.dataset.do && r(e.target.dataset.do));
+      });
       closeModal();
       if (choice === 'drop') await guard(() => api(`inbox/${cap.id}`, { method: 'DELETE' }));
       else break;
@@ -1055,6 +1179,7 @@ app.addEventListener('click', async (e) => {
     toast("Imprévu en cours. Touche « Fin de l'imprévu » quand c'est réglé.");
     return load();
   }
+  if (act === 'mic') return mic.state === 'rec' ? stopMic() : mic.state === 'idle' ? startMic() : null;
   if (act === 'calls') return openCalls();
   if (act === 'mirror') return openMirror();
   if (act === 'prev') return load(addDays(d.date, -1));
@@ -1108,6 +1233,7 @@ app.addEventListener('submit', async (e) => {
 
 document.addEventListener('keydown', (e) => e.key === 'Escape' && modalRoot.firstChild && closeModal());
 document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') return stopMic();
   if (document.visibilityState === 'visible' && S.data && !modalRoot.firstChild && !drag) load(S.date === S.data.today ? null : S.date);
 });
 

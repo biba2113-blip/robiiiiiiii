@@ -73,6 +73,17 @@ git pull
 npm install && npm run deploy
 ```
 
+## Le bouton micro
+
+Dans la boîte du bas : un tap pour parler, un second pour finir. Le texte part se faire classer et tu confirmes comme d'habitude.
+Fermer la confirmation sans ajouter garde le texte dans la boîte.
+
+- La transcription se fait avec Whisper (`@cf/openai/whisper-large-v3-turbo`) par Workers AI, sur ton propre compte Cloudflare.
+  L'audio n'est gardé nulle part.
+- Un enregistrement s'arrête seul après 5 minutes.
+- Le coût se compte en fractions de cent par minute, et Workers AI a une allocation gratuite chaque jour. Vérifie les tarifs à jour dans ton tableau de bord Cloudflare.
+- Le micro du clavier fonctionne toujours, et ne passe pas par Whisper.
+
 ## Dicter sans ouvrir l'app (raccourci iPhone)
 
 Le raccourci est à créer à la main, dans l'app Raccourcis, avec deux actions :
@@ -101,7 +112,8 @@ npm run migrate:local
 npm run dev
 ```
 
-L'app locale s'ouvre sur `http://localhost:8790/` (elle mène à `/k/dev/`). Les secrets locaux vont dans `.dev.vars` (hors du dépôt), créé tout seul avec la clé `dev`.
+L'app locale tourne sans lien distant (`--local`) : tout fonctionne sauf la transcription du bouton micro, qui répond par un message d'erreur.
+Elle s'ouvre sur `http://localhost:8790/` (elle mène à `/k/dev/`). Les secrets locaux vont dans `.dev.vars` (hors du dépôt), créé tout seul avec la clé `dev`.
 En ligne, sans `ACCESS_KEY`, Pro ne sert rien du tout.
 
 ```bash
@@ -113,6 +125,7 @@ npm test
 | `src/index.js` | Routes, lien privé (`/k/<clé>/`, 404 sans la clé), horloge des notifications |
 | `public/plan.js` | Ordre de tri et placement à l'horaire, partagé par le serveur et l'app |
 | `src/parse.js`, `src/rules.js` | La dictée devient des tâches : Claude, puis règles de secours |
+| `src/transcribe.js` | Le bouton micro : l'enregistrement devient du texte (Whisper, Workers AI) |
 | `src/caldav.js` | Lecture et écriture du calendrier iCloud (CalDAV) |
 | `src/track.js` | Le chrono et l'imprévu |
 | `src/notify.js`, `src/push.js` | Quoi notifier et quand ; chiffrement et envoi (Web Push) |
@@ -122,18 +135,20 @@ npm test
 | `public/app.js`, `public/styles.css`, `public/sw.js` | L'écran, et la réception des notifications |
 | `migrations/` | Les tables |
 | `scripts/setup.mjs` | Installation sur Cloudflare |
-| `test/` | Tests de la logique, et un parcours complet à l'écran (`parcours.e2e.cjs`, demande Playwright) |
+| `test/` | Tests de la logique, et deux parcours à l'écran (`parcours.e2e.cjs`, `micro.e2e.cjs`, demandent Playwright) |
 
 ## Ce qui a été vérifié, et ce qui ne l'a pas été
 
 Vérifié :
-- 32 tests de logique, dont le chiffrement des notifications contre le vecteur officiel de la RFC 8291.
+- 37 tests de logique, dont le chiffrement des notifications contre le vecteur officiel de la RFC 8291.
 - Le parcours complet à l'écran, sur Mac et iPhone simulés : dictée, confirmation, cocher, glisser, chrono, imprévu, mode appels, bilan, tri du soir, réserve, ce qui revient.
 - La chaîne des notifications en local, de l'horloge jusqu'au message déchiffré par un faux appareil, sans doublon.
 - Le calendrier contre un serveur CalDAV d'essai (Radicale).
+- Le bouton micro à l'écran, sur Mac et iPhone simulés, avec un faux micro : enregistrement, envoi de l'audio, confirmation, micro refusé, panne de transcription.
 
 Pas encore vérifié, faute d'accès :
 - **L'assistant du Mac.** Il n'a jamais tourné : il est écrit pour macOS et a été développé sous Linux. Attends-toi à des ajustements au premier essai.
+- **La transcription elle-même.** Whisper n'a jamais été appelé pour vrai, ni l'enregistrement fait sur un vrai iPhone (format audio différent de celui du test).
 - Une vraie notification reçue sur un iPhone ou un Mac.
 - Le vrai calendrier iCloud.
 - Un vrai appel à Claude avec une clé valide.

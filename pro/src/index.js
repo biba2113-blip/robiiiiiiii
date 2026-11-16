@@ -8,6 +8,7 @@ import { runNotifications, NOTIF_DEFAULTS } from './notify.js';
 import { broadcast, pushReady } from './push.js';
 import { generate, EVERY } from './recurring.js';
 import { bilan, mirror, recordActivity, offSummary, pace, OFF_DEFAULTS } from './bilan.js';
+import { transcribe, TranscribeError, MAX_AUDIO_BYTES } from './transcribe.js';
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -110,6 +111,7 @@ async function sheet(env, date, { fresh = false } = {}) {
     pace: await pace(env),
     off: await offSummary(env, date),
     push: { ready: pushReady(env), public_key: env.VAPID_PUBLIC || null },
+    mic: Boolean(env.AI),
     notif: {
       notif_start: settings.notif_start, notif_over: settings.notif_over, notif_due: settings.notif_due,
       notif_evening: settings.notif_evening, evening_min: settings.evening_min,
@@ -242,6 +244,18 @@ async function triage(env, ctx, { decisions = [], to }) {
 
 async function api(req, env, ctx, path, url) {
   const m = req.method;
+
+  // Le micro : le corps est l'enregistrement lui-même, pas du JSON.
+  if (path === 'transcribe' && m === 'POST') {
+    if (Number(req.headers.get('Content-Length') || 0) > MAX_AUDIO_BYTES) return bad('Enregistrement trop long : coupe-le en deux.', 413);
+    try {
+      return json(await transcribe(env, await req.arrayBuffer()));
+    } catch (err) {
+      if (err instanceof TranscribeError) return bad(err.message, err.status);
+      throw err;
+    }
+  }
+
   const body = ['POST', 'PUT', 'PATCH'].includes(m) ? await req.json().catch(() => ({})) : {};
   const today = toLocal().date;
   let r;
