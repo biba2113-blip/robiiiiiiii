@@ -6,7 +6,9 @@ import { parseWithRules } from './rules.js';
 import { addDays, dow } from './time.js';
 
 const DAY_NAMES = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
-const DEFAULT_MODEL = 'claude-opus-5-5';
+// Le modèle rapide et peu coûteux par défaut : classer une dictée est un travail d'extraction.
+// Pour un modèle plus fort (et plus lent), mets CLAUDE_MODEL à claude-opus-5-5 dans wrangler.template.jsonc.
+const DEFAULT_MODEL = 'claude-haiku-5-5';
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 
 const TaskList = z.object({
@@ -83,12 +85,13 @@ async function underCap(env) {
 
 async function ask(env, system, user, schema) {
   const client = new Anthropic({ apiKey: String(env.ANTHROPIC_API_KEY).trim(), timeout: 20_000, maxRetries: 0 });
+  const model = env.CLAUDE_MODEL || DEFAULT_MODEL;
   const response = await client.beta.messages.parse({
-    model: env.CLAUDE_MODEL || DEFAULT_MODEL,
+    model,
     max_tokens: 16000,
-    betas: [FALLBACK_BETA],
-    fallbacks: 'default', // si le modèle décline, l'API relance sur un autre dans le même appel
-    output_config: { effort: 'low', format: betaZodOutputFormat(schema) },
+    // Si le modèle décline, l'API relance sur un autre dans le même appel. Haiku n'a pas ce filet : on ne l'envoie pas.
+    ...(/haiku/.test(model) ? {} : { betas: [FALLBACK_BETA], fallbacks: 'default' }),
+    output_config: { effort: 'low', format: betaZodOutputFormat(schema) }, // « low » : peu de réflexion, réponse plus rapide
     system,
     messages: [{ role: 'user', content: user }],
   });

@@ -275,20 +275,37 @@ async function triage(env, ctx, { decisions = [], to }) {
   return touched.length;
 }
 
+/** Un texte dicté devient des tâches à confirmer : il est gardé comme dictée, puis classé. */
+async function understand(env, text, { today, defaultDay, captureId = null }) {
+  if (!captureId) {
+    const ins = await run(env, "INSERT INTO captures (raw_text, source, default_day, created_at) VALUES (?, 'app', ?, ?)", text, defaultDay, nowIso());
+    captureId = ins.meta.last_row_id;
+  }
+  const out = await parseDump(env, text, { today, defaultDay });
+  await run(env, 'UPDATE captures SET parsed_json = ?, engine = ? WHERE id = ?', JSON.stringify(out.items), out.engine, captureId);
+  return { capture_id: captureId, ...out };
+}
+
 // ---- Les routes ----
 
 async function api(req, env, ctx, path, url) {
   const m = req.method;
 
   // Le micro : le corps est l'enregistrement lui-même, pas du JSON.
-  if (path === 'transcribe' && m === 'POST') {
+  // « dictate » écoute et classe dans le même aller-retour ; « transcribe » ne fait qu'écouter (anciennes versions de l'app).
+  if ((path === 'dictate' || path === 'transcribe') && m === 'POST') {
     if (Number(req.headers.get('Content-Length') || 0) > MAX_AUDIO_BYTES) return bad('Enregistrement trop long : coupe-le en deux.', 413);
+    let heard;
     try {
-      return json(await transcribe(env, await req.arrayBuffer()));
+      heard = await transcribe(env, await req.arrayBuffer());
     } catch (err) {
       if (err instanceof TranscribeError) return bad(err.message, err.status);
       throw err;
     }
+    if (path === 'transcribe' || !heard.text || heard.text.length > 6000) return json(heard);
+    const today = toLocal().date;
+    const day = url.searchParams.get('day');
+    return json({ ...heard, parsed: await understand(env, heard.text, { today, defaultDay: isDate(day) && day >= today ? day : today }) });
   }
 
   const body = ['POST', 'PUT', 'PATCH'].includes(m) ? await req.json().catch(() => ({})) : {};
@@ -302,7 +319,7 @@ async function api(req, env, ctx, path, url) {
 
   if (path === 'parse' && m === 'POST') {
     let text = String(body.text || '').trim();
-    let captureId = Number(body.capture_id) || null;
+    const captureId = Number(body.capture_id) || null;
     const defaultDay = isDate(body.default_day) && body.default_day >= today ? body.default_day : today;
     if (captureId) {
       const cap = await first(env, 'SELECT * FROM captures WHERE id = ?', captureId);
@@ -311,13 +328,7 @@ async function api(req, env, ctx, path, url) {
     }
     if (!text) return bad('Rien à comprendre');
     if (text.length > 6000) return bad('Texte trop long : coupe-le en deux');
-    if (!captureId) {
-      const ins = await run(env, "INSERT INTO captures (raw_text, source, default_day, created_at) VALUES (?, 'app', ?, ?)", text, defaultDay, nowIso());
-      captureId = ins.meta.last_row_id;
-    }
-    const out = await parseDump(env, text, { today, defaultDay });
-    await run(env, 'UPDATE captures SET parsed_json = ?, engine = ? WHERE id = ?', JSON.stringify(out.items), out.engine, captureId);
-    return json({ capture_id: captureId, ...out });
+    return json(await understand(env, text, { today, defaultDay, captureId }));
   }
 
   // Essayer Claude pour vrai, depuis les réglages.

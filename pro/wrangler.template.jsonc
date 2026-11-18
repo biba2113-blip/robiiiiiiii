@@ -10,5 +10,5 @@
   "ai": { "binding": "AI" },
   "version_metadata": { "binding": "VERSION" },
   "triggers": { "crons": ["* * * * *"] },
-  "vars": { "CLAUDE_MODEL": "claude-opus-5-5", "AI_MONTHLY_CALLS": "1500", "CALDAV_URL": "https://caldav.icloud.com" }
+  "vars": { "CLAUDE_MODEL": "claude-haiku-5-5", "AI_MONTHLY_CALLS": "1500", "CALDAV_URL": "https://caldav.icloud.com" }
 }

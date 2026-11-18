@@ -401,7 +401,7 @@ function micHtml() {
 }
 // Sur un petit écran, la boîte est étroite : un texte court, et le bouton « Ajouter » s'efface pendant qu'on dicte.
 const capturePlaceholder = () =>
-  mic.state === 'rec' ? 'Je t’écoute…' : mic.state === 'busy' ? 'Je transcris…' : innerWidth < 520 ? 'Vide ta tête…' : "Vide ta tête : dicte ou écris tout d'un coup…";
+  mic.state === 'rec' ? 'Je t’écoute…' : mic.state === 'busy' ? 'J’écoute et je classe…' : innerWidth < 520 ? 'Vide ta tête…' : "Vide ta tête : dicte ou écris tout d'un coup…";
 function paintMic() {
   const el = $('.mic');
   if (el) el.outerHTML = micHtml();
@@ -475,7 +475,10 @@ async function finishMic(chunks, type) {
   }
   let data;
   try {
-    const res = await fetch('api/transcribe', { method: 'POST', headers: { 'Content-Type': type.split(';')[0] }, body: blob });
+    // Un seul aller-retour : le serveur écoute, puis classe, et rend les tâches à confirmer.
+    const sheet = S.data;
+    const day = sheet.date >= sheet.today ? sheet.date : sheet.today;
+    const res = await fetch(`api/dictate?day=${day}`, { method: 'POST', headers: { 'Content-Type': type.split(';')[0] }, body: blob });
     data = await res.json().catch(() => ({}));
     if (!res.ok) data = { error: data.error || `Le serveur a répondu ${res.status}` };
   } catch {
@@ -486,9 +489,12 @@ async function finishMic(chunks, type) {
   if (!data.text) return toast("Je n'ai rien entendu. Réessaie plus près du micro.", 4000);
   const ta = $('#capture-text');
   if (!ta) return;
-  ta.value = (ta.value.trim() ? ta.value.trim() + ' ' : '') + data.text;
+  // Déjà classé par le serveur, sauf s'il y avait du texte dans la boîte : dans ce cas l'ensemble repart se faire classer.
+  const alone = !ta.value.trim();
+  ta.value = (alone ? '' : ta.value.trim() + ' ') + data.text;
   autoGrow(ta);
-  // Le texte part tout de suite se faire classer ; tu confirmes ou corriges à l'écran suivant.
+  S.heard = alone && data.parsed ? { text: ta.value.trim(), parsed: data.parsed } : null;
+  // Tu confirmes ou corriges à l'écran suivant.
   if (!modalRoot.firstChild && !S.busy) $('#capture').requestSubmit();
 }
 
@@ -714,7 +720,10 @@ function openConfirm(parsed, { said } = {}) {
 }
 
 async function captureAndConfirm(text, defaultDay) {
-  const parsed = await guard(() => api('parse', { method: 'POST', body: { text, default_day: defaultDay } }));
+  // Une dictée au micro arrive déjà classée ; un texte tapé (ou retouché) part se faire classer.
+  const heard = S.heard?.text === text ? S.heard.parsed : null;
+  S.heard = null;
+  const parsed = heard || (await guard(() => api('parse', { method: 'POST', body: { text, default_day: defaultDay } })));
   if (!parsed) return 0;
   if (!parsed.items.length) {
     toast("Je n'ai trouvé aucune tâche là-dedans.");

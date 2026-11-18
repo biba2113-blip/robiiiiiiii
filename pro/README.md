@@ -128,11 +128,13 @@ Assigne le raccourci au bouton Action ou dis « Dis Siri » suivi de son nom. La
   Dans Pro, ⚙ puis « Tester Claude » fait un vrai essai et dit pourquoi ça échoue.
 - Les règles de secours comprennent le style télégraphique (« Faire, offre, 4 logements, 30 minutes environ. » : une tâche de 30 minutes) et les durées dictées.
 
-- Le modèle est réglé dans `wrangler.template.jsonc` (`CLAUDE_MODEL`, par défaut `claude-opus-5-5`).
-  Une dictée coûte de l'ordre de quelques cents. Pour réduire beaucoup la facture, mets `claude-haiku-5-5` et relance `npm run deploy`.
+- Le modèle est réglé dans `wrangler.template.jsonc` (`CLAUDE_MODEL`). Par défaut : `claude-haiku-5-5`, le modèle rapide.
+  Ordre de grandeur, estimé et non mesuré : moins d'un dixième de cent US par dictée (0,10 $ et 0,50 $ par million de jetons en entrée et en sortie).
+  Pour un modèle plus fort mais plus lent, mets `claude-opus-5-5` (4 $ et 20 $ par million de jetons, soit environ 3 cents par dictée) et relance `npm run deploy`.
+- La dictée au micro fait un seul aller-retour : le serveur écoute (Whisper), classe (Claude) et rend les tâches à confirmer.
 - Deux plafonds : la limite de dépense que tu fixes sur la clé, et `AI_MONTHLY_CALLS` (1500 appels par mois par défaut).
   Au-delà, ou si Claude ne répond pas, des règles simples classent la dictée et rien n'est perdu.
-- Si le modèle décline une demande, l'API relance sur un autre modèle dans le même appel (`fallbacks`).
+- Avec un modèle Opus, si le modèle décline une demande, l'API relance sur un autre modèle dans le même appel (`fallbacks`). Haiku n'a pas ce filet : les règles simples prennent le relais.
 
 ## Développer
 

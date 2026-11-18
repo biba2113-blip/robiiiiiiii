@@ -23,7 +23,7 @@ const SAID = 'Rappeler Marc pour la visite du triplex, payer la facture du plomb
   for (const [name, vp] of [['mac', { width: 1280, height: 900 }], ['iphone', { width: 390, height: 844 }]]) {
     const p = await mk(vp);
     const sent = [];
-    await p.route('**/api/transcribe', async (route) => {
+    await p.route('**/api/dictate*', async (route) => {
       const req = route.request();
       sent.push({ type: req.headers()['content-type'], bytes: req.postDataBuffer()?.length || 0 });
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ text: SAID, seconds: 3 }) });
@@ -75,17 +75,45 @@ const SAID = 'Rappeler Marc pour la visite du triplex, payer la facture du plomb
     await p.waitForSelector('.mic[data-act="mic"]:not(.rec)');
 
     // 7. La transcription en panne (le serveur local n'a pas Whisper) : un message clair, le micro revient.
-    await p.unroute('**/api/transcribe');
+    await p.unroute('**/api/dictate*');
     await p.click('.mic');
     await p.waitForFunction(() => document.querySelector('.mic-time')?.textContent === '0:01');
     await p.click('.mic.rec');
     await p.waitForFunction(() => /transcription n’a pas fonctionné/.test(document.querySelector('#toast')?.textContent || ''));
     await p.waitForSelector('.mic[data-act="mic"]:not(.rec)');
     assert.equal(await p.locator('.veil').count(), 0);
+
+    // 8. Le serveur rend la dictée déjà classée : la confirmation s'ouvre sans second appel.
+    let parses = 0;
+    p.on('request', (r) => /\/api\/parse$/.test(r.url()) && parses++);
+    await p.route('**/api/dictate*', (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          text: 'Appeler le notaire',
+          seconds: 2,
+          parsed: { capture_id: null, engine: 'claude', items: [{ title: 'Appeler le notaire', section: 'rappel', company: 'immo', nature: 'attend', day: null, due_date: null, est_minutes: 10, kind: 'tache', start_min: null, contact: 'Notaire', phone: null, note: null }] },
+        }),
+      }),
+    );
+    await p.click('.mic');
+    await p.waitForFunction(() => document.querySelector('.mic-time')?.textContent === '0:01');
+    await p.click('.mic.rec');
+    await p.waitForSelector('.ccard');
+    assert.equal(await p.locator('.ccard').count(), 1);
+    assert.equal(parses, 0, 'aucun second appel pour classer');
+    await p.keyboard.press('Escape');
+    await p.waitForSelector('.veil', { state: 'detached' });
+    assert.equal(await p.inputValue('#capture-text'), 'Appeler le notaire', 'le texte reste dans la boîte');
+    // Retouché à la main, il repart se faire classer.
+    await p.fill('#capture-text', 'Appeler le notaire demain');
+    await p.click('.send');
+    await p.waitForSelector('.ccard');
+    assert.equal(parses, 1);
     await p.context().close();
   }
 
-  // 8. Micro refusé : un message, pas d'enregistrement.
+  // 9. Micro refusé : un message, pas d'enregistrement.
   const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
   const p = await ctx.newPage();
   await p.addInitScript(() => {
