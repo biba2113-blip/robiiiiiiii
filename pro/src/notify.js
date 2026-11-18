@@ -45,12 +45,13 @@ export function dueNotifications(ctx) {
       const hour = fmtTime(t.start_min);
       const title =
         t.section !== 'rappel' ? `${hour} · ${t.title}` : run.count > 1 ? `${hour} · ${run.count} personnes à rappeler` : `${hour} · ${t.title}`;
-      out.push({ key: `start:${now.date}:${t.id}:${t.start_min}`, title, body: t.section === 'rappel' ? 'Ouvre le mode appels.' : "C'est l'heure de commencer." });
+      const body = t.kind === 'vie' ? "C'est l'heure. Le travail attendra." : t.section === 'rappel' ? 'Ouvre le mode appels.' : "C'est l'heure de commencer.";
+      out.push({ key: `start:${now.date}:${t.id}:${t.start_min}`, title, body });
     }
   }
 
   if (s.notif_over) {
-    for (const t of todo.filter((x) => x.start_min != null && inWindow(x.start_min + x.est_minutes + 20, now.min))) {
+    for (const t of todo.filter((x) => x.kind !== 'vie' && x.start_min != null && inWindow(x.start_min + x.est_minutes + 20, now.min))) {
       if (!callRun(t, todo).first) continue;
       out.push({ key: `over:${now.date}:${t.id}:${t.start_min}`, title: t.title, body: 'Encore dessus, ou on déplace la suite ?' });
     }
@@ -67,7 +68,7 @@ export function dueNotifications(ctx) {
   }
 
   if (s.notif_evening && inWindow(s.evening_min, now.min) && !tomorrowPrepared) {
-    const n = todo.length;
+    const n = todo.filter((t) => t.kind !== 'vie').length;
     out.push({
       key: `evening:${now.date}`,
       title: 'Préparer demain',

@@ -72,7 +72,7 @@ export async function recordActivity(env, { app, site, inPro = false }) {
   let remaining = [];
   if (remind) {
     await env.DB.prepare("INSERT INTO journal (day, at, kind, detail) VALUES (?, ?, 'remind', ?)").bind(now.date, Date.now(), site || app || '').run();
-    remaining = (await all(env, "SELECT title FROM tasks WHERE day = ? AND status = 'todo' ORDER BY (start_min IS NULL), start_min, sort LIMIT 3", now.date)).map((t) => t.title);
+    remaining = (await all(env, "SELECT title FROM tasks WHERE day = ? AND status = 'todo' AND kind != 'vie' ORDER BY (start_min IS NULL), start_min, sort LIMIT 3", now.date)).map((t) => t.title);
   }
   return { kind, off_minutes: off, budget: s.off_budget, remind, remaining };
 }
@@ -107,14 +107,14 @@ const median = (arr) => {
 
 /** Ton rythme : rapport entre le temps réel et le temps prévu, sur tes dernières tâches mesurées. Null tant qu'il y en a moins de 5. */
 export async function pace(env) {
-  const rows = await all(env, "SELECT est_minutes, actual_minutes FROM tasks WHERE status = 'done' AND actual_minutes >= 2 ORDER BY done_at DESC LIMIT 30");
+  const rows = await all(env, "SELECT est_minutes, actual_minutes FROM tasks WHERE status = 'done' AND kind != 'vie' AND actual_minutes >= 2 ORDER BY done_at DESC LIMIT 30");
   if (rows.length < 5) return null;
   return Math.min(2.5, Math.max(0.5, Math.round(median(rows.map((r) => r.actual_minutes / r.est_minutes)) * 10) / 10));
 }
 
 /** Le bilan d'une journée : prévu contre fait, par type de travail. */
 export async function bilan(env, date, { day, events = [], settings = DEFAULTS } = {}) {
-  const tasks = await all(env, "SELECT * FROM tasks WHERE day = ? AND status != 'deleted'", date);
+  const tasks = await all(env, "SELECT * FROM tasks WHERE day = ? AND status != 'deleted' AND kind != 'vie'", date);
   const tracked = await minutesFor(env, date);
   const off = await offSummary(env, date);
   const rows = Object.entries(GROUPS).map(([key, label]) => {
@@ -164,7 +164,7 @@ export async function bilan(env, date, { day, events = [], settings = DEFAULTS }
 /** Le miroir du dimanche : trois constats sur les sept derniers jours, un seul ajustement. */
 export async function mirror(env, today) {
   const from = addDays(today, -6);
-  const tasks = await all(env, "SELECT * FROM tasks WHERE day >= ? AND day <= ? AND status != 'deleted'", from, today);
+  const tasks = await all(env, "SELECT * FROM tasks WHERE day >= ? AND day <= ? AND status != 'deleted' AND kind != 'vie'", from, today);
   const entries = await all(env, 'SELECT * FROM entries WHERE day >= ? AND day <= ? AND ended_at IS NOT NULL', from, today);
   const act = await all(env, "SELECT minute, app, site FROM activity WHERE day >= ? AND day <= ? AND kind = 'hors'", from, today);
   const pushed = await all(env, "SELECT title, pushed_count, company, nature, section FROM tasks WHERE status = 'todo' AND pushed_count >= 2 ORDER BY pushed_count DESC LIMIT 3");

@@ -80,3 +80,33 @@ test("l'affichage des heures et des durées", () => {
   assert.equal(fmtDur(45), '45 min');
   assert.equal(fmtDur(90), '1 h 30');
 });
+
+test('un moment hors travail avec une heure raccourcit la journée, sans compter dans le prévu', () => {
+  // Journée de 6 h à 18 h ; « voir ma blonde » de 17 h à 22 h.
+  const day = { work_start: 360, work_end: 1080, evening_work: 0, evening_end: 1260 };
+  const blonde = T(50, { kind: 'vie', start_min: 1020, est_minutes: 300, pinned: 1 });
+  const without = place([T(1), T(2)], day, [], undefined, { today: TODAY });
+  const withIt = place([T(1), T(2), blonde], day, [], undefined, { today: TODAY });
+  assert.equal(without.available - withIt.available, 60, "une heure de travail en moins : de 17 h à 18 h");
+  assert.equal(withIt.planned, 60, 'le moment ne compte pas dans le temps prévu');
+  assert.ok(!withIt.placed.some((p) => p.id === 50) && !withIt.unplaced.includes(50), 'il garde son heure, rien ne le déplace');
+  for (const p of withIt.placed) assert.ok(p.start_min + 30 <= 1020, 'aucune tâche après 17 h');
+  assert.ok(withIt.free.every(([, b]) => b <= 1020), 'le temps libre s’arrête à 17 h');
+});
+
+test('le gym en pleine journée fait un trou, les tâches se placent autour', () => {
+  const gym = T(60, { kind: 'vie', start_min: 600, est_minutes: 60, pinned: 1 }); // 10 h à 11 h
+  const tasks = Array.from({ length: 6 }, (_, i) => T(i + 1, { est_minutes: 45 }));
+  const res = place([...tasks, gym], DAY, [], undefined, { today: TODAY });
+  for (const p of res.placed) assert.ok(p.start_min + 45 <= 600 || p.start_min >= 660, `la tâche ${p.id} évite le gym`);
+  assert.equal(res.planned, 270);
+});
+
+test('un moment hors travail sans heure n’est ni placé ni compté', () => {
+  const amis = T(70, { kind: 'vie', est_minutes: 120 });
+  const res = place([T(1), amis], DAY, [], undefined, { today: TODAY });
+  assert.equal(res.planned, 30);
+  assert.deepEqual(res.unplaced, []);
+  assert.deepEqual(res.placed.map((p) => p.id), [1]);
+  assert.equal(res.available, place([T(1)], DAY, [], undefined, { today: TODAY }).available);
+});

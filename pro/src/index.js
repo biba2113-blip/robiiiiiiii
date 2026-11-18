@@ -1,7 +1,7 @@
 // Pro : le serveur. Tout vit sous le lien privé /k/<clé>/ ; sans la clé, 404.
 import { place, DEFAULTS } from '../public/plan.js';
 import { toLocal, addDays, dow, nowIso } from './time.js';
-import { parseDump, firstStep, sanitize, checkClaude } from './parse.js';
+import { parseDump, firstStep, sanitize, checkClaude, MAX_MINUTES } from './parse.js';
 import { configured, eventsFor, syncTasks, listCalendars } from './caldav.js';
 import { current, focus, stop, imprevu, onTaskClosed, minutesFor } from './track.js';
 import { runNotifications, NOTIF_DEFAULTS } from './notify.js';
@@ -76,9 +76,15 @@ async function sheet(env, date, { fresh = false } = {}) {
     env.DB.prepare("UPDATE tasks SET day = ? WHERE status = 'todo' AND due_date IS NOT NULL AND due_date <= ? AND day IS NULL").bind(today, soon),
   ]);
 
+  // Un moment hors travail sans heure, pas encore fait, suit sur aujourd'hui sans rien demander.
+  await run(env, "UPDATE tasks SET day = ? WHERE kind = 'vie' AND status = 'todo' AND start_min IS NULL AND day IS NOT NULL AND day < ?", today, today);
+
   const [day, tasks, cal] = await Promise.all([getDay(env, date, settings), tasksOf(env, date), eventsFor(env, date, { fresh })]);
+  // Le tri ne porte que sur le travail : un moment hors travail passé n'est pas une tâche en retard.
   const triage =
-    date === today ? await all(env, "SELECT * FROM tasks WHERE status = 'todo' AND day IS NOT NULL AND day < ? ORDER BY day, sort", today) : [];
+    date === today
+      ? await all(env, "SELECT * FROM tasks WHERE status = 'todo' AND kind != 'vie' AND day IS NOT NULL AND day < ? ORDER BY day, sort", today)
+      : [];
   const reserve = await first(env, "SELECT COUNT(*) AS n FROM tasks WHERE status = 'todo' AND day IS NULL");
   const inbox = await all(env, "SELECT id, raw_text, created_at FROM captures WHERE source = 'raccourci' AND confirmed_at IS NULL ORDER BY id");
   const summary = place(tasks, day, cal.events, settings, { today });
@@ -149,9 +155,13 @@ async function createTasks(env, ctx, items, { source = 'manuel', captureId = nul
   const stamp = Date.now();
   const stmts = clean.map((t, i) =>
     env.DB.prepare(
-      `INSERT INTO tasks (title, section, company, nature, day, due_date, est_minutes, contact, phone, note, sort, source, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(t.title, t.section, t.company, t.nature, t.day, t.due_date, t.est_minutes, t.contact, t.phone, t.note, stamp + i, source, nowIso()),
+      `INSERT INTO tasks (title, section, company, nature, day, due_date, est_minutes, contact, phone, note, kind, start_min, pinned, sort, source, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      t.title, t.section, t.company, t.nature, t.day, t.due_date, t.est_minutes, t.contact, t.phone, t.note,
+      t.kind, t.day ? t.start_min : null, t.day && t.start_min != null ? 1 : 0, // une heure dite ne bouge plus
+      stamp + i, source, nowIso(),
+    ),
   );
   if (stmts.length) await env.DB.batch(stmts);
   if (captureId) await run(env, 'UPDATE captures SET confirmed_at = ? WHERE id = ?', nowIso(), captureId);
@@ -159,7 +169,7 @@ async function createTasks(env, ctx, items, { source = 'manuel', captureId = nul
   return clean.length;
 }
 
-const EDITABLE = ['title', 'section', 'company', 'nature', 'day', 'due_date', 'est_minutes', 'start_min', 'status', 'contact', 'phone', 'note', 'first_step', 'sort'];
+const EDITABLE = ['title', 'section', 'company', 'nature', 'day', 'due_date', 'est_minutes', 'start_min', 'status', 'contact', 'phone', 'note', 'first_step', 'sort', 'kind'];
 
 async function patchTask(env, ctx, id, body) {
   const old = await first(env, 'SELECT * FROM tasks WHERE id = ?', id);
@@ -178,7 +188,8 @@ async function patchTask(env, ctx, id, body) {
   if ('status' in set && !['todo', 'done', 'deleted'].includes(set.status)) delete set.status;
   if ('day' in set && set.day !== null && !isDate(set.day)) delete set.day;
   if ('due_date' in set && set.due_date !== null && !isDate(set.due_date)) delete set.due_date;
-  if ('est_minutes' in set) set.est_minutes = Math.min(480, Math.max(5, Math.round(Number(set.est_minutes) || 30)));
+  if ('est_minutes' in set) set.est_minutes = Math.min(MAX_MINUTES, Math.max(5, Math.round(Number(set.est_minutes) || 30)));
+  if ('kind' in set && !['tache', 'vie'].includes(set.kind)) delete set.kind;
   if ('sort' in set) set.sort = Number(set.sort) || 0;
 
   if (set.section === 'rappel' && (set.nature ?? old.nature) === 'autre') set.nature = 'attend';
@@ -192,7 +203,10 @@ async function patchTask(env, ctx, id, body) {
       set.pinned = 1; // une heure choisie à la main ne bouge plus
     }
   }
-  if ('day' in set && set.day !== old.day && !('start_min' in set)) {
+  const kind = set.kind ?? old.kind;
+  if (kind === 'vie' && ('kind' in set || 'section' in set)) set.section = 'faire'; // jamais dans les appels ni les priorités
+  // Une tâche qui change de jour perd son heure ; un moment hors travail la garde (« voir ma blonde à 17 h », reporté à demain).
+  if ('day' in set && set.day !== old.day && !('start_min' in set) && (kind !== 'vie' || set.day === null)) {
     set.start_min = null;
     set.pinned = 0;
   }
@@ -203,7 +217,7 @@ async function patchTask(env, ctx, id, body) {
   }
   const task = await first(env, 'SELECT * FROM tasks WHERE id = ?', id);
 
-  const moves = ['day', 'est_minutes', 'start_min'].some((k) => k in set) || set.status === 'deleted' || set.status === 'todo';
+  const moves = ['day', 'est_minutes', 'start_min', 'kind'].some((k) => k in set) || set.status === 'deleted' || set.status === 'todo';
   if (moves) await replanMany(env, ctx, [old.day, task.day].filter((d) => d && d >= today));
   // Le replacement ne voit que les tâches encore sur la feuille : les autres sont synchronisées ici.
   if (!moves || task.status !== 'todo' || !task.day) ctx.waitUntil(syncTasks(env, [task]));

@@ -1,5 +1,5 @@
 // Pro : l'écran. Une feuille du jour, une boîte pour vider ta tête, un tri le soir.
-import { freeWindows, sortTasks, fmtTime, fmtDur, daysBetween } from './plan.js';
+import { freeWindows, sortTasks, fmtTime, fmtDur, daysBetween, isLife } from './plan.js';
 import { cheerFor } from './cheer.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -39,8 +39,8 @@ function dayLabel(date, today = S.data.today) {
 }
 const toTimeInput = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 const fromTimeInput = (v) => {
-  const [h, m] = String(v || '').split(':').map(Number);
-  return Number.isFinite(h) ? h * 60 + (m || 0) : null;
+  const m = String(v || '').match(/^(\d{1,2}):(\d{2})/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null; // un champ vide n'est pas minuit
 };
 
 // ---- Serveur ----
@@ -100,10 +100,18 @@ const canReload = () => !modalRoot.firstChild && !$('#capture-text')?.value.trim
 
 const isAvoided = (t) => t.status === 'todo' && t.pushed_count >= 2;
 
+/** « 17 h à 22 h » pour un moment qui a une heure. */
+const span = (t) => `${fmtTime(t.start_min)} à ${fmtTime((t.start_min + t.est_minutes) % 1440)}`;
+
 function metaOf(t) {
   const d = S.data;
   const bits = [];
   const tracked = d.tracked?.[t.id] || 0;
+  if (isLife(t)) {
+    bits.push(t.start_min != null ? span(t) : 'Sans heure : ne prend pas de place à l’horaire');
+    if (t.note) bits.push(t.note);
+    return bits.join(' · ');
+  }
   if (d.focus?.task_id === t.id) bits.push('En cours');
   if (t.status === 'done') {
     if (t.actual_minutes) bits.push(`Fait en ${fmtDur(t.actual_minutes)}`);
@@ -134,7 +142,7 @@ function rowHtml(t, { num, avoid = false } = {}) {
   }
   return `<div class="row${done ? ' done' : ''}${cur ? ' current' : ''}" data-id="${t.id}">
     ${lead}<button class="cb${done ? ' on' : ''}" data-act="check" aria-label="${done ? 'Décocher' : 'Cocher'} : ${esc(t.title)}"></button>
-    <div class="t" data-act="${done ? 'edit' : 'focus'}" role="button" tabindex="0" aria-pressed="${cur}"><span class="tt">${esc(t.title)}</span><small>${esc(metaOf(t))}</small>${extra}</div>
+    <div class="t" data-act="${done || isLife(t) ? 'edit' : 'focus'}" role="button" tabindex="0" aria-pressed="${cur}"><span class="tt">${esc(t.title)}</span><small>${esc(metaOf(t))}</small>${extra}</div>
     <i class="dot c-${t.company}" title="${COMPANIES[t.company]}"></i>
     ${done ? '' : `<button class="more" data-act="edit" aria-label="Modifier : ${esc(t.title)}">⋯</button>`}
     ${done || avoid ? '' : '<span class="grip" data-grip aria-hidden="true">⠿</span>'}
@@ -160,6 +168,17 @@ function boxHtml(section, tasks) {
     ${ordered.map((t, i) => rowHtml(t, { num: section === 'priorite' ? i + 1 : 0 })).join('')}
     ${done.map((t) => rowHtml(t)).join('')}
     ${tasks.length ? '' : `<p class="empty">${empty}</p>`}${hint}
+  </section>`;
+}
+
+/** Hors travail : blonde, amis, gym. Avec une heure, le moment réserve sa place à l'horaire. */
+function lifeHtml(list) {
+  const todo = list.filter((t) => t.status === 'todo').sort((a, b) => (a.start_min ?? 9999) - (b.start_min ?? 9999) || a.sort - b.sort);
+  const done = list.filter((t) => t.status === 'done');
+  return `<section class="box life" data-drop="life:1">
+    <h2>Hors travail<span class="count">${todo.length || ''}</span></h2>
+    ${todo.map((t) => rowHtml(t)).join('')}${done.map((t) => rowHtml(t)).join('')}
+    ${list.length ? '' : '<p class="empty">Blonde, amis, gym. Dis-le avec l’heure, par exemple « voir ma blonde de 17 h à 22 h » : ton horaire de travail s’arrête autour.</p>'}
   </section>`;
 }
 
@@ -208,7 +227,7 @@ function scheduleHtml() {
   rows = merged.map((r) => (r.kind === 'calls' && r.tasks.length === 1 ? { t: r.t, kind: 'task', task: r.tasks[0] } : r));
 
   const allDay = d.events.filter((e) => e.allDay);
-  const unplaced = d.tasks.filter((t) => t.status === 'todo' && t.start_min == null);
+  const unplaced = d.tasks.filter((t) => t.status === 'todo' && t.start_min == null && !isLife(t));
   const hours = `${fmtTime(d.day.work_start)} à ${fmtTime(d.day.work_end)}${d.day.evening_work ? `, puis jusqu'à ${fmtTime(d.day.evening_end)}` : ''}`;
 
   const line = (r) => {
@@ -220,6 +239,11 @@ function scheduleHtml() {
     }
     const t = r.task;
     const cur = d.focus?.task_id === t.id;
+    if (isLife(t)) {
+      return `<div class="blk life" data-id="${t.id}">
+      <div class="bt" data-act="edit" role="button" tabindex="0">${esc(t.title)}<small>Hors travail · jusqu'à ${fmtTime((t.start_min + t.est_minutes) % 1440)}</small></div>
+      <span class="grip" data-grip aria-hidden="true">⠿</span></div>`;
+    }
     return `<div class="blk task c-${t.company}${cur ? ' current' : ''}" data-id="${t.id}">
       <div class="bt" data-act="edit" role="button" tabindex="0">${t.section === 'rappel' ? 'Appel : ' : ''}${esc(t.title)}<small>${cur ? 'En cours · ' : ''}${fmtDur(t.est_minutes)}${t.pinned ? ' · heure fixée' : ''}</small></div>
       <span class="grip" data-grip aria-hidden="true">⠿</span></div>`;
@@ -262,7 +286,7 @@ const elapsed = (since) => fmtDur(Math.max(0, Math.round((Date.now() - since) / 
 
 function render() {
   const d = S.data;
-  const tasks = d.tasks;
+  const tasks = d.tasks.filter((t) => !isLife(t));
   const total = tasks.length;
   const done = tasks.filter((t) => t.status === 'done').length;
   const pct = total ? Math.round((done / total) * 100) : 0;
@@ -308,7 +332,7 @@ function render() {
     <div id="banners">${bannersHtml()}</div>
     <main class="grid">
       ${scheduleHtml()}
-      <div class="boxes">${boxHtml('priorite', by('priorite'))}${boxHtml('rappel', by('rappel'))}${boxHtml('faire', by('faire'))}${avoidHtml(tasks)}</div>
+      <div class="boxes">${boxHtml('priorite', by('priorite'))}${boxHtml('rappel', by('rappel'))}${boxHtml('faire', by('faire'))}${lifeHtml(d.tasks.filter(isLife))}${avoidHtml(tasks)}</div>
     </main>
     <form class="capture${mic.state === 'idle' ? '' : ' is-rec'}" id="capture">
       <textarea id="capture-text" rows="1" placeholder="${capturePlaceholder()}" aria-label="Ajouter des tâches"></textarea>
@@ -491,18 +515,25 @@ function openEdit(id) {
   const dayVal = t.day === d.today ? 'today' : t.day === addDays(d.today, 1) ? 'tomorrow' : t.day === null ? 'reserve' : 'other';
   const m = openModal(`
     <h2>Modifier</h2>
-    <label class="field"><span>Tâche</span><input id="e-title" value="${esc(t.title)}"></label>
-    <div class="field"><span>Section</span>${chips('section', Object.entries(SECTIONS), t.section)}</div>
+    <label class="field"><span>${isLife(t) ? 'Moment' : 'Tâche'}</span><input id="e-title" value="${esc(t.title)}"></label>
+    <div class="field"><span>Compte dans</span>${chips('kind', [['tache', 'Mon travail'], ['vie', 'Hors travail']], isLife(t) ? 'vie' : 'tache')}</div>
+    <div class="field" id="e-section"${isLife(t) ? ' hidden' : ''}><span>Section</span>${chips('section', Object.entries(SECTIONS), t.section)}</div>
     <div class="field"><span>Entreprise</span>${chips('company', Object.entries(COMPANIES).map(([k, v]) => [k, `<i class="dot c-${k}"></i>${v}`]), t.company)}</div>
     <div class="field"><span>Jour</span>${chips('day', [['today', "Aujourd'hui"], ['tomorrow', 'Demain'], ['reserve', 'Réserve'], ['other', 'Autre date']], dayVal)}
       <input type="date" id="e-date" value="${t.day || ''}" min="${d.today}" ${dayVal === 'other' ? '' : 'hidden'}></div>
     <div class="field"><span>Durée</span>${chips('dur', DURATIONS.map((n) => [n, fmtDur(n)]), DURATIONS.includes(t.est_minutes) ? t.est_minutes : '')}</div>
-    <div class="field two"><label><span>Heure</span><input type="time" id="e-time" step="300" value="${t.start_min != null ? toTimeInput(t.start_min) : ''}"></label>
-      <label><span>Échéance</span><input type="date" id="e-due" value="${t.due_date || ''}"></label></div>
+    <div class="field two"><label><span>Début</span><input type="time" id="e-time" step="300" value="${t.start_min != null ? toTimeInput(t.start_min) : ''}"></label>
+      <label><span>Fin (facultatif)</span><input type="time" id="e-end" step="300" value="${t.start_min != null && (isLife(t) || !DURATIONS.includes(t.est_minutes)) ? toTimeInput((t.start_min + t.est_minutes) % 1440) : ''}"></label></div>
+    <label class="field half" id="e-duebox"${isLife(t) ? ' hidden' : ''}><span>Échéance</span><input type="date" id="e-due" value="${t.due_date || ''}"></label>
     <label class="field"><span>Téléphone (pour le mode appels)</span><input type="tel" id="e-phone" value="${esc(t.phone || '')}" placeholder="450 555-0123"></label>
-    <p class="hint">Laisse l'heure vide pour que l'outil place la tâche. Une heure choisie ne bouge plus.</p>
+    <p class="hint">Laisse le début vide pour que l'outil place la tâche. Une heure choisie ne bouge plus. Un moment hors travail avec une heure réserve sa place : le travail se range autour.</p>
     <div class="foot"><button class="btn danger" data-do="delete">Supprimer</button><span class="grow"></span><button class="btn ghost" data-act="close">Annuler</button><button class="btn" data-do="save">Enregistrer</button></div>`);
-  m.addEventListener('chips', () => ($('#e-date', m).hidden = chipValue(m, 'day') !== 'other'));
+  m.addEventListener('chips', () => {
+    $('#e-date', m).hidden = chipValue(m, 'day') !== 'other';
+    const life = chipValue(m, 'kind') === 'vie';
+    $('#e-section', m).hidden = life;
+    $('#e-duebox', m).hidden = life;
+  });
   m.addEventListener('click', async (e) => {
     const act = e.target.closest('[data-do]')?.dataset.do;
     if (!act) return;
@@ -512,14 +543,19 @@ function openEdit(id) {
       const dv = chipValue(m, 'day');
       const day = dv === 'today' ? d.today : dv === 'tomorrow' ? addDays(d.today, 1) : dv === 'reserve' ? null : $('#e-date', m).value || t.day;
       const time = fromTimeInput($('#e-time', m).value);
+      const kind = chipValue(m, 'kind') === 'vie' ? 'vie' : 'tache';
       const body = {
         title: $('#e-title', m).value,
         section: chipValue(m, 'section'),
         company: chipValue(m, 'company'),
-        due_date: $('#e-due', m).value || null,
+        due_date: kind === 'vie' ? null : $('#e-due', m).value || null,
         phone: $('#e-phone', m).value.trim() || null,
       };
-      const dur = Number(chipValue(m, 'dur'));
+      if (kind !== (t.kind || 'tache')) body.kind = kind;
+      // Une heure de fin donne la durée ; sinon ce sont les boutons de durée.
+      const end = fromTimeInput($('#e-end', m).value);
+      const range = time != null && end != null ? (end > time ? end - time : end + 1440 - time) : 0;
+      const dur = range && range <= 900 ? range : Number(chipValue(m, 'dur'));
       if (dur && dur !== t.est_minutes) body.est_minutes = dur;
       if (day !== t.day) body.day = day;
       if (time !== t.start_min && !(time === null && t.start_min != null && !t.pinned)) body.start_min = time;
@@ -538,13 +574,14 @@ function confirmCardHtml(it, i, open) {
   const durs = DURATIONS.includes(it.est_minutes) ? DURATIONS : [...DURATIONS, it.est_minutes].sort((a, b) => a - b);
   const edit = open
     ? `<div class="cedit">
-        <div class="field"><span>Section</span>${chips('section', Object.entries(SECTIONS), it.section)}</div>
+        <div class="field"><span>Compte dans</span>${chips('kind', [['tache', 'Mon travail'], ['vie', 'Hors travail']], it.kind === 'vie' ? 'vie' : 'tache')}</div>
+        ${it.kind === 'vie' ? '' : `<div class="field"><span>Section</span>${chips('section', Object.entries(SECTIONS), it.section)}</div>`}
         <div class="field"><span>Entreprise</span>${chips('company', Object.entries(COMPANIES).map(([k, v]) => [k, `<i class="dot c-${k}"></i>${v}`]), it.company)}</div>
         <div class="field"><span>Jour</span>${chips('day', dayOpts, it.day ?? '')}</div>
         <div class="field"><span>Durée</span>${chips('est_minutes', durs.map((n) => [n, fmtDur(n)]), it.est_minutes)}</div>
       </div>`
     : '';
-  return `<div class="ccard c-${it.company}${open ? ' open' : ''}" data-i="${i}">
+  return `<div class="ccard c-${it.company}${it.kind === 'vie' ? ' life' : ''}${open ? ' open' : ''}" data-i="${i}">
     <div class="chead">
       <textarea class="ctitle" data-f="title" rows="1" aria-label="Tâche">${esc(it.title)}</textarea>
       <button type="button" class="cx" data-rm aria-label="Retirer cette tâche">✕</button>
@@ -552,10 +589,10 @@ function confirmCardHtml(it, i, open) {
     ${it.note ? `<p class="cnote">${esc(it.note)}</p>` : ''}
     <button type="button" class="csum" data-toggle aria-expanded="${open}">
       <span class="csum-items">
-        <span class="sec">${SECTIONS[it.section]}</span>
+        <span class="sec">${it.kind === 'vie' ? 'Hors travail' : SECTIONS[it.section]}</span>
         <span><i class="dot c-${it.company}"></i>${COMPANIES[it.company]}</span>
         <span>${esc(dayLabel(it.day))}</span>
-        <span>${fmtDur(it.est_minutes)}</span>
+        <span>${it.start_min != null && it.day ? (it.kind === 'vie' ? span(it) : `${fmtTime(it.start_min)} · ${fmtDur(it.est_minutes)}`) : fmtDur(it.est_minutes)}</span>
         ${it.due_date ? `<span class="due">Échéance ${esc(dayLabel(it.due_date).toLowerCase())}</span>` : ''}
       </span>
       <span class="chev">${open ? 'Fermer' : 'Corriger'}</span>
@@ -725,7 +762,7 @@ const QUESTIONS = ['Qui dois-tu rappeler ?', "Qu'as-tu promis à quelqu'un ?", "
 async function openEvening() {
   const d = S.data;
   const tomorrow = addDays(d.today, 1);
-  const left = d.tasks.filter((t) => t.status === 'todo');
+  const left = d.tasks.filter((t) => t.status === 'todo' && !isLife(t));
   const stepQuestions = () => {
     const m = openModal(
       `<p class="step">Préparer demain · vide ta tête</p><h2>Quatre questions</h2>
@@ -1213,8 +1250,17 @@ async function toggleCheck(id, rowEl) {
   const t = S.data.tasks.find((x) => x.id === id);
   if (!t) return;
   const toDone = t.status !== 'done';
-  if (toDone) {
-    const tasks = S.data.tasks;
+  if (toDone && isLife(t)) {
+    // Un moment hors travail : une petite fête, sans toucher au compte de la journée de travail.
+    const cb = $('.cb', rowEl);
+    rowEl.classList.add('checking');
+    cb.classList.add('on');
+    navigator.vibrate?.(12);
+    chime('task');
+    celebrate(cb, 12);
+    toast('C’est fait. Ça compte aussi.');
+  } else if (toDone) {
+    const tasks = S.data.tasks.filter((x) => !isLife(x));
     const total = tasks.length;
     const done = tasks.filter((x) => x.status === 'done').length + 1;
     const avoided = isAvoided(t);
@@ -1294,7 +1340,9 @@ async function endDrag(apply) {
   const t = S.data.tasks.find((x) => x.id === id);
   const [kind, val] = target.dataset.drop.split(':');
   let body = null;
-  if (kind === 'section' && val !== t.section) body = { section: val };
+  if (kind === 'section' && isLife(t)) body = { kind: 'tache', section: val };
+  else if (kind === 'section' && val !== t.section) body = { section: val };
+  if (kind === 'life' && !isLife(t)) body = { kind: 'vie' };
   if (kind === 'time') body = { start_min: Number(val) };
   if (kind === 'day') body = { day: val === 'reserve' ? null : addDays(S.data.today, 1) };
   if (!body) return;

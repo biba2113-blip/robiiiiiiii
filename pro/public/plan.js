@@ -43,6 +43,14 @@ export function mostAvoided(tasks) {
     .sort((a, b) => b.pushed_count - a.pushed_count || a.id - b.id)[0];
 }
 
+/** Un moment hors travail (blonde, amis, gym) : il ne compte pas dans le temps de travail. */
+export const isLife = (t) => t.kind === 'vie';
+
+/** Les moments hors travail qui ont une heure : ils occupent l'horaire comme un rendez-vous. */
+export function lifeBlocks(tasks) {
+  return tasks.filter((t) => isLife(t) && t.start_min != null).map((t) => ({ start_min: t.start_min, end_min: t.start_min + t.est_minutes, allDay: false }));
+}
+
 /** Retire un intervalle occupé d'une liste d'intervalles libres. */
 function subtract(free, s, e) {
   const out = [];
@@ -74,6 +82,8 @@ const total = (iv) => iv.reduce((n, [a, b]) => n + (b - a), 0);
 
 /**
  * Place les tâches du jour.
+ * - les moments hors travail qui ont une heure réservent leur place et raccourcissent la journée de travail ;
+ *   ceux qui n'ont pas d'heure ne sont pas placés ; aucun ne compte dans le temps prévu ;
  * - les tâches épinglées (heure choisie à la main) ne bougent pas ;
  * - la plus reportée passe en premier, puis l'ordre de tri ;
  * - une part de la journée reste libre pour les imprévus, en deux blocs (milieu et fin).
@@ -82,8 +92,8 @@ const total = (iv) => iv.reduce((n, [a, b]) => n + (b - a), 0);
 export function place(tasks, day, events = [], settings = DEFAULTS, opts = {}) {
   const s = { ...DEFAULTS, ...settings };
   const today = opts.today || '0000-00-00';
-  const todo = tasks.filter((t) => t.status === 'todo');
-  let free = freeWindows(day, events, s);
+  const todo = tasks.filter((t) => t.status === 'todo' && !isLife(t));
+  let free = freeWindows(day, [...events, ...lifeBlocks(tasks)], s);
   const available = total(free);
   const buffer = Math.round((available * s.buffer_pct) / 100 / SNAP) * SNAP;
   const capacity = available - buffer;

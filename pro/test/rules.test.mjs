@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseWithRules, nextWeekday, unspoken, takeDuration } from '../src/rules.js';
+import { parseWithRules, nextWeekday, unspoken, takeDuration, takeTime } from '../src/rules.js';
 import { sanitize } from '../src/parse.js';
 import { toLocal, toUtc, addDays, dow } from '../src/time.js';
 
@@ -48,7 +48,7 @@ test('une liste sur plusieurs lignes', () => {
 
 test('le nettoyage refuse les valeurs inventées', () => {
   const t = sanitize({ title: '  Test  ', section: 'nimporte', company: 'x', nature: 'y', day: 'demain', due_date: '31 nov', est_minutes: 9999 }, CTX);
-  assert.deepEqual(t, { title: 'Test', section: 'faire', company: 'perso', nature: 'autre', day: '2026-11-16', due_date: null, est_minutes: 480, contact: null, phone: null, note: null });
+  assert.deepEqual(t, { title: 'Test', section: 'faire', company: 'perso', nature: 'autre', day: '2026-11-16', due_date: null, est_minutes: 900, kind: 'tache', start_min: null, contact: null, phone: null, note: null });
   assert.equal(sanitize({ title: '' }, CTX), null);
   assert.equal(sanitize({ title: 'x', day: null }, CTX).day, null); // la réserve
   assert.equal(sanitize({ title: 'x', day: '2026-11-01' }, CTX).day, '2026-11-16'); // jamais dans le passé
@@ -102,4 +102,33 @@ test('les vraies listes à virgules restent séparées, chacune avec sa durée',
   const items = parseWithRules('Rappeler Marc 10 minutes, payer le plombier 20 minutes, épicerie', CTX);
   assert.deepEqual(items.map((i) => [i.title, i.est_minutes]), [['Rappeler Marc', 10], ['Payer le plombier', 20], ['Épicerie', 30]]);
   assert.equal(parseWithRules('1. appeler Marc\n2) 4 logements à visiter', CTX)[1].title, '4 logements à visiter');
+});
+
+test("l'heure dite est comprise : une plage, une heure seule, pas une échéance", () => {
+  assert.deepEqual(takeTime('Voir ma blonde de 17 h à 22 h'), { text: 'Voir ma blonde', start: 1020, minutes: 300 });
+  assert.deepEqual(takeTime('Gym 12h-13h30'), { text: 'Gym', start: 720, minutes: 90 });
+  assert.deepEqual(takeTime('Réunion entre 9 h et 10 h 30 avec Julie'), { text: 'Réunion avec Julie', start: 540, minutes: 90 });
+  assert.deepEqual(takeTime('Appeler Marc à 14 h'), { text: 'Appeler Marc', start: 840, minutes: null });
+  assert.deepEqual(takeTime('Gym vers midi'), { text: 'Gym', start: 720, minutes: null });
+  assert.deepEqual(takeTime('Envoyer le bail avant 15 h'), { text: 'Envoyer le bail avant 15 h', start: null, minutes: null });
+  assert.deepEqual(takeTime('Payer la facture'), { text: 'Payer la facture', start: null, minutes: null });
+});
+
+test('les moments hors travail sont reconnus, avec leur heure', () => {
+  const items = parseWithRules('Voir ma blonde de 17 h à 22 h. Gym à midi, une heure. Souper avec des amis vendredi. Appeler Marc à 14 h. Payer les plaques.', CTX);
+  assert.deepEqual(
+    items.map((i) => [i.title, i.kind, i.start_min, i.est_minutes]),
+    [
+      ['Voir ma blonde', 'vie', 1020, 300],
+      ['Gym', 'vie', 720, 60],
+      ['Souper avec des amis vendredi', 'vie', null, 60],
+      ['Appeler Marc', 'tache', 840, 10],
+      ['Payer les plaques', 'tache', null, 30],
+    ],
+  );
+  assert.equal(items[2].day, '2026-11-20');
+  const clean = sanitize({ ...items[0], section: 'priorite', nature: 'obligation', due_date: '2026-11-20' }, CTX);
+  assert.deepEqual([clean.section, clean.nature, clean.due_date, clean.kind, clean.start_min], ['faire', 'autre', null, 'vie', 1020]);
+  assert.equal(sanitize({ title: 'x', start_time: '17:30' }, CTX).start_min, 1050);
+  assert.equal(sanitize({ title: 'x', start_time: 'bientôt' }, CTX).start_min, null);
 });
