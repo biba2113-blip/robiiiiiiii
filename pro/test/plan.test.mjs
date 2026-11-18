@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { place, rank, sortTasks, freeWindows, mostAvoided, fmtTime, fmtDur } from '../public/plan.js';
+import { place, rank, sortTasks, freeWindows, mostAvoided, fmtTime, fmtDur, flexOrder, shownOrder, moveInOrder, reasonOf, nowNext } from '../public/plan.js';
 
 const T = (id, o = {}) => ({ id, title: 't' + id, section: 'faire', nature: 'autre', status: 'todo', est_minutes: 30, pushed_count: 0, pinned: 0, start_min: null, sort: id, due_date: null, ...o });
 const DAY = { work_start: 480, work_end: 1080, evening_work: 0, evening_end: 1260 };
@@ -109,4 +109,85 @@ test('un moment hors travail sans heure n’est ni placé ni compté', () => {
   assert.deepEqual(res.unplaced, []);
   assert.deepEqual(res.placed.map((p) => p.id), [1]);
   assert.equal(res.available, place([T(1)], DAY, [], undefined, { today: TODAY }).available);
+});
+
+// ---- L'ordre de la journée, choisi à la main ----
+
+/** Place les tâches et rend la liste avec leurs heures, comme le fait le serveur. */
+const laidOut = (tasks, day = DAY) => {
+  const res = place(tasks, day, [], undefined, { today: TODAY });
+  const at = new Map(res.placed.map((p) => [p.id, p.start_min]));
+  return tasks.map((t) => (t.kind === 'vie' || (t.pinned && t.start_min != null) ? t : { ...t, start_min: at.get(t.id) ?? null }));
+};
+/** Applique un déplacement : la suite rendue devient l'ordre à la main, puis on replace. */
+const applyMove = (tasks, id, to) => {
+  const seq = moveInOrder(tasks, id, to, TODAY);
+  if (!seq) return null;
+  return laidOut(tasks.map((t) => (seq.includes(t.id) ? { ...t, manual: seq.indexOf(t.id), pinned: t.id === id ? 0 : t.pinned } : t)));
+};
+const byTime = (tasks) => tasks.filter((t) => t.start_min != null && t.kind !== 'vie').sort((a, b) => a.start_min - b.start_min).map((t) => t.id);
+
+test("sans rien toucher, l'ordre est celui de Pro ; une tâche montée garde sa place", () => {
+  const tasks = laidOut([T(1), T(2, { nature: 'obligation' }), T(3, { section: 'rappel' }), T(4, { nature: 'avance' })]);
+  assert.deepEqual(byTime(tasks), [2, 3, 4, 1], "obligation, quelqu'un attend, fait avancer, le reste");
+  const up = applyMove(tasks, 1, { dir: 'up' });
+  assert.deepEqual(byTime(up), [2, 3, 1, 4]);
+  const first = applyMove(up, 1, { dir: 'first' });
+  assert.deepEqual(byTime(first), [1, 2, 3, 4]);
+  const down = applyMove(first, 2, { dir: 'down' });
+  assert.deepEqual(byTime(down), [1, 3, 2, 4]);
+  assert.equal(moveInOrder(first, 1, { dir: 'up' }, TODAY), null, 'la première ne monte pas plus haut');
+  assert.equal(moveInOrder(first, 4, { dir: 'down' }, TODAY), null, 'la dernière ne descend pas plus bas');
+});
+
+test('glisser une tâche devant une autre, ou à la fin', () => {
+  const tasks = laidOut([T(1), T(2), T(3), T(4)]);
+  assert.deepEqual(byTime(applyMove(tasks, 4, { before: 2 })), [1, 4, 2, 3]);
+  assert.deepEqual(byTime(applyMove(tasks, 1, { before: 4 })), [2, 3, 1, 4]);
+  assert.deepEqual(byTime(applyMove(tasks, 1, { before: null })), [2, 3, 4, 1]);
+  assert.equal(moveInOrder(tasks, 2, { before: 99 }, TODAY), null);
+});
+
+test("l'ordre à la main tient autour des blocs fixes, et une nouvelle tâche arrive à la fin", () => {
+  const gym = T(60, { kind: 'vie', start_min: 600, est_minutes: 60, pinned: 1 });
+  const rdv = T(61, { start_min: 540, est_minutes: 30, pinned: 1 }); // une tâche à heure fixée, 9 h
+  let tasks = laidOut([T(1, { est_minutes: 60 }), T(2, { est_minutes: 60 }), T(3, { est_minutes: 60 }), gym, rdv]);
+  tasks = applyMove(tasks, 3, { dir: 'first' });
+  assert.deepEqual(flexOrder(tasks, TODAY).map((t) => t.id), [3, 1, 2]);
+  assert.equal(tasks.find((t) => t.id === 61).start_min, 540, "l'heure fixée ne bouge pas");
+  assert.equal(tasks.find((t) => t.id === 60).start_min, 600);
+  const withNew = laidOut([...tasks, T(9, { nature: 'obligation' })]);
+  assert.deepEqual(flexOrder(withNew, TODAY).map((t) => t.id), [3, 1, 2, 9], 'la nouvelle ne bouscule pas ton ordre');
+});
+
+test('une tâche à heure fixée qu’on monte redevient libre et prend sa place dans la suite', () => {
+  const tasks = laidOut([T(1), T(2), T(3, { start_min: 900, pinned: 1 })]); // la 3 est fixée à 15 h
+  assert.deepEqual(shownOrder(tasks, TODAY).map((t) => t.id), [1, 2]);
+  const moved = applyMove(tasks, 3, { dir: 'up' });
+  assert.equal(moved.find((t) => t.id === 3).pinned, 0);
+  assert.deepEqual(byTime(moved), [1, 3, 2]);
+});
+
+test('un moment hors travail ne se range pas dans l’ordre du travail', () => {
+  const tasks = laidOut([T(1), T(70, { kind: 'vie', est_minutes: 60 })]);
+  assert.equal(moveInOrder(tasks, 70, { dir: 'up' }, TODAY), null);
+});
+
+test('le mot affiché dit pourquoi la tâche est là', () => {
+  assert.equal(reasonOf(T(1, { due_date: '2026-11-17' }), TODAY), 'Échéance proche');
+  assert.equal(reasonOf(T(1, { nature: 'obligation' }), TODAY), 'Obligation');
+  assert.equal(reasonOf(T(1, { section: 'rappel' }), TODAY), 'Quelqu’un attend');
+  assert.equal(reasonOf(T(1, { nature: 'avance' }), TODAY), 'Fait avancer');
+  assert.equal(reasonOf(T(1), TODAY), '');
+  assert.equal(reasonOf(T(1, { pushed_count: 2 }), TODAY), 'Tu la repousses');
+  assert.equal(reasonOf(T(1, { manual: 0, nature: 'obligation' }), TODAY), 'Placée par toi');
+  assert.equal(reasonOf(T(1, { pinned: 1, start_min: 600 }), TODAY), 'Heure fixée');
+});
+
+test('maintenant et ensuite', () => {
+  const blocks = [{ start: 480, end: 540 }, { start: 540, end: 600 }, { start: 660, end: 720 }];
+  assert.deepEqual(nowNext(blocks, 500), { now: 0, next: 1 });
+  assert.deepEqual(nowNext(blocks, 620), { now: -1, next: 2 }, 'dans un trou : seulement la suivante');
+  assert.deepEqual(nowNext(blocks, 400), { now: -1, next: 0 });
+  assert.deepEqual(nowNext(blocks, 800), { now: -1, next: -1 });
 });

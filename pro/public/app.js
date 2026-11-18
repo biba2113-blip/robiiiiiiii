@@ -1,11 +1,19 @@
 // Pro : l'écran. Une feuille du jour, une boîte pour vider ta tête, un tri le soir.
-import { freeWindows, sortTasks, fmtTime, fmtDur, daysBetween, isLife } from './plan.js';
+import { freeWindows, sortTasks, fmtTime, fmtDur, daysBetween, isLife, shownOrder, reasonOf, nowNext } from './plan.js';
 import { cheerFor } from './cheer.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const app = $('#app');
 const modalRoot = $('#modal-root');
-const S = { data: null, date: null, triageSeen: false, busy: false };
+const S = { data: null, date: null, triageSeen: false, busy: false, filter: null, view: 'ordre' };
+// Sur iPhone : la journée dans l'ordre d'abord, ou les sections d'abord. Le choix reste sur l'appareil.
+try {
+  if (localStorage.getItem('pro_vue') === 'sections') S.view = 'sections';
+} catch {
+  // stockage refusé : on garde « dans l'ordre »
+}
+/** Le filtre par entreprise : une tâche est montrée si aucun filtre n'est actif ou si c'est son entreprise. */
+const shown = (t) => !S.filter || t.company === S.filter;
 
 const SECTIONS = { priorite: 'Priorités', rappel: 'À rappeler', faire: 'À faire' };
 const COMPANIES = { robiii: 'Robiii', immo: 'ImmoMulti', perso: 'Perso' };
@@ -196,20 +204,23 @@ function scheduleHtml() {
   const isToday = d.date === d.today;
   let rows = [];
   for (const ev of d.events) if (!ev.allDay) rows.push({ t: ev.start_min, kind: 'rdv', title: ev.title, end: ev.end_min });
-  for (const t of d.tasks) if (t.start_min != null && t.status === 'todo') rows.push({ t: t.start_min, kind: 'task', task: t });
+  for (const t of d.tasks) if (t.start_min != null && t.status === 'todo' && shown(t)) rows.push({ t: t.start_min, kind: 'task', task: t, end: t.start_min + t.est_minutes });
   const sup = d.settings;
   rows.push({ t: sup.supper_start, kind: 'souper', end: sup.supper_start + sup.supper_min });
 
   // Les trous d'au moins 30 minutes dans les heures de travail : gardés pour les imprévus.
-  let free = freeWindows(d.day, d.events, d.settings);
-  for (const t of d.tasks.filter((x) => x.status === 'todo' && x.start_min != null)) {
-    const s = t.start_min;
-    const e = s + t.est_minutes;
-    free = free.flatMap(([a, b]) => (e <= a || s >= b ? [[a, b]] : [[a, s], [e, b]].filter(([x, y]) => y > x)));
-  }
-  for (const [a, b] of free) {
-    const from = isToday ? Math.max(a, Math.ceil(d.now_min / 5) * 5) : a;
-    if (b - from >= 30) rows.push({ t: from, kind: 'libre', end: b });
+  // Avec un filtre d'entreprise, on ne les montre pas : l'horaire affiché n'est qu'une partie de la journée.
+  if (!S.filter) {
+    let free = freeWindows(d.day, d.events, d.settings);
+    for (const t of d.tasks.filter((x) => x.status === 'todo' && x.start_min != null)) {
+      const s = t.start_min;
+      const e = s + t.est_minutes;
+      free = free.flatMap(([a, b]) => (e <= a || s >= b ? [[a, b]] : [[a, s], [e, b]].filter(([x, y]) => y > x)));
+    }
+    for (const [a, b] of free) {
+      const from = isToday ? Math.max(a, Math.ceil(d.now_min / 5) * 5) : a;
+      if (b - from >= 30) rows.push({ t: from, kind: 'libre', end: b });
+    }
   }
   rows.sort((x, y) => x.t - y.t || (x.kind === 'rdv' ? -1 : 1));
 
@@ -224,35 +235,52 @@ function scheduleHtml() {
     } else if (isCall) merged.push({ t: r.t, kind: 'calls', tasks: [r.task], end: r.t + r.task.est_minutes });
     else merged.push(r);
   }
-  rows = merged.map((r) => (r.kind === 'calls' && r.tasks.length === 1 ? { t: r.t, kind: 'task', task: r.tasks[0] } : r));
+  rows = merged.map((r) => (r.kind === 'calls' && r.tasks.length === 1 ? { t: r.t, kind: 'task', task: r.tasks[0], end: r.end } : r));
+
+  // Aujourd'hui : le bloc en cours et le suivant sont étiquetés.
+  const real = rows.filter((r) => r.kind === 'task' || r.kind === 'calls' || r.kind === 'rdv');
+  const mark = isToday ? nowNext(real.map((r) => ({ start: r.t, end: r.end })), d.now_min) : { now: -1, next: -1 };
+  const tagOf = (r) => (real[mark.now] === r ? '<span class="tag now">Maintenant</span>' : real[mark.next] === r ? '<span class="tag next">Ensuite</span>' : '');
+
+  // Les tâches qu'on peut monter ou descendre, dans l'ordre affiché.
+  const movable = shownOrder(d.tasks, d.today).filter((t) => t.start_min != null).map((t) => t.id);
 
   const allDay = d.events.filter((e) => e.allDay);
-  const unplaced = d.tasks.filter((t) => t.status === 'todo' && t.start_min == null && !isLife(t));
+  const unplaced = d.tasks.filter((t) => t.status === 'todo' && t.start_min == null && !isLife(t) && shown(t));
   const hours = `${fmtTime(d.day.work_start)} à ${fmtTime(d.day.work_end)}${d.day.evening_work ? `, puis jusqu'à ${fmtTime(d.day.evening_end)}` : ''}`;
+  const byHand = d.tasks.some((t) => t.status === 'todo' && t.manual != null);
 
   const line = (r) => {
-    if (r.kind === 'rdv') return `<div class="blk rdv">${esc(r.title)}<small>Rendez-vous · jusqu'à ${fmtTime(r.end)}</small></div>`;
+    if (r.kind === 'rdv') return `<div class="blk rdv">${esc(r.title)}${tagOf(r)}<small>Rendez-vous · jusqu'à ${fmtTime(r.end)}</small></div>`;
     if (r.kind === 'souper') return `<div class="blk plain">Souper</div>`;
     if (r.kind === 'libre') return `<div class="blk free">Libre pour les imprévus<small>jusqu'à ${fmtTime(r.end)}</small></div>`;
     if (r.kind === 'calls') {
-      return `<div class="blk calls" data-act="calls" role="button" tabindex="0">${r.tasks.length} personnes à rappeler<small>${esc(r.tasks.map((t) => t.contact || t.title).join(' · '))}</small><small class="go">Ouvrir le mode appels</small></div>`;
+      return `<div class="blk calls" data-act="calls" role="button" tabindex="0">${r.tasks.length} personnes à rappeler${tagOf(r)}<small>${esc(r.tasks.map((t) => t.contact || t.title).join(' · '))}</small><small class="go">Ouvrir le mode appels</small></div>`;
     }
     const t = r.task;
     const cur = d.focus?.task_id === t.id;
     if (isLife(t)) {
       return `<div class="blk life" data-id="${t.id}">
-      <div class="bt" data-act="edit" role="button" tabindex="0">${esc(t.title)}<small>Hors travail · jusqu'à ${fmtTime((t.start_min + t.est_minutes) % 1440)}</small></div>
+      <button class="cb" data-act="check" aria-label="Cocher : ${esc(t.title)}"></button>
+      <div class="bt" data-act="edit" role="button" tabindex="0"><span class="tt">${esc(t.title)}</span><small>Hors travail · jusqu'à ${fmtTime((t.start_min + t.est_minutes) % 1440)}</small></div>
       <span class="grip" data-grip aria-hidden="true">⠿</span></div>`;
     }
+    const at = movable.indexOf(t.id);
+    const fixed = at < 0; // une heure fixée : la monter ou la descendre la libère
+    const why = reasonOf(t, d.today);
     return `<div class="blk task c-${t.company}${cur ? ' current' : ''}" data-id="${t.id}">
-      <div class="bt" data-act="edit" role="button" tabindex="0">${t.section === 'rappel' ? 'Appel : ' : ''}${esc(t.title)}<small>${cur ? 'En cours · ' : ''}${fmtDur(t.est_minutes)}${t.pinned ? ' · heure fixée' : ''}</small></div>
+      <button class="cb" data-act="check" aria-label="Cocher : ${esc(t.title)}"></button>
+      <div class="bt" data-act="edit" role="button" tabindex="0"><span class="tt">${t.section === 'rappel' ? 'Appel : ' : ''}${esc(t.title)}</span>${tagOf(r)}<small>${cur ? 'En cours · ' : ''}${fmtDur(t.est_minutes)}${why ? ` · ${why}` : ''}</small></div>
+      <span class="mv"><button data-act="up" aria-label="Faire plus tôt : ${esc(t.title)}"${!fixed && at === 0 ? ' disabled' : ''}>↑</button><button data-act="down" aria-label="Faire plus tard : ${esc(t.title)}"${!fixed && at === movable.length - 1 ? ' disabled' : ''}>↓</button></span>
       <span class="grip" data-grip aria-hidden="true">⠿</span></div>`;
   };
+  // Déposer une tâche sur une autre la range juste avant ; sur le reste, elle prend cette heure.
+  const dropOf = (r) => (r.kind === 'task' && !isLife(r.task) ? `before:${r.task.id}:${r.t}` : `time:${r.t}`);
 
   return `<section class="box horaire">
     <h2>Horaire<button class="link" data-act="hours">${esc(hours)}</button></h2>
     ${allDay.length ? `<p class="allday">${allDay.map((e) => `<span>${esc(e.title)}</span>`).join('')}</p>` : ''}
-    ${rows.map((r) => `<div class="hr" data-drop="time:${r.t}"><time>${fmtTime(r.t)}</time>${line(r)}</div>`).join('')}
+    ${rows.map((r) => `<div class="hr" data-drop="${dropOf(r)}"><time>${fmtTime(r.t)}</time>${line(r)}</div>`).join('')}
     ${
       unplaced.length
         ? `<div class="unplaced"><h3>Pas de place à l'horaire (${unplaced.length})</h3>
@@ -260,7 +288,7 @@ function scheduleHtml() {
            <p class="hint">Glisse-les vers Demain, ou raccourcis une durée.</p></div>`
         : ''
     }
-    <div class="hr-actions"><button class="btn ghost" data-act="replan">Replacer ma journée</button></div>
+    <div class="hr-actions"><button class="btn ghost" data-act="replan">Replacer ma journée</button>${byHand ? '<button class="link" data-act="auto-order">Reprendre l’ordre proposé par Pro</button>' : ''}</div>
   </section>`;
 }
 
@@ -299,8 +327,14 @@ function render() {
   const off = d.off?.active
     ? `<span class="${d.off.minutes >= d.off.budget ? 'warn' : ''}">Hors feuille : ${fmtDur(d.off.minutes)} sur ${fmtDur(d.off.budget)}</span>`
     : '';
-  const by = (s) => tasks.filter((t) => t.section === s);
+  const by = (s) => tasks.filter((t) => t.section === s && shown(t));
   const keep = $('#capture-text')?.value || '';
+  // Les entreprises en haut servent de filtre : un tap pour n'en voir qu'une, un autre pour tout revoir.
+  const left = (c) => d.tasks.filter((t) => t.status === 'todo' && t.company === c).length;
+  const filters = `<span class="legend">${S.filter ? '<button class="fchip" data-act="filter" data-v="">Tout voir</button>' : ''}${Object.entries(COMPANIES)
+    .map(([c, name]) => `<button class="fchip${S.filter === c ? ' on' : ''}" data-act="filter" data-v="${c}" aria-pressed="${S.filter === c}"><i class="dot c-${c}"></i>${name}${left(c) ? ` <b>${left(c)}</b>` : ''}</button>`)
+    .join('')}</span>`;
+  const views = `<div class="views" role="group" aria-label="Affichage"><button data-act="view" data-v="ordre" class="${S.view === 'ordre' ? 'on' : ''}" aria-pressed="${S.view === 'ordre'}">Dans l'ordre</button><button data-act="view" data-v="sections" class="${S.view === 'sections' ? 'on' : ''}" aria-pressed="${S.view === 'sections'}">Par section</button></div>`;
   const f = d.focus;
   const isToday = d.date === d.today;
   const nowbar = f
@@ -326,13 +360,14 @@ function render() {
       ${nowbar}
       <div class="prog${total && done === total ? ' full' : ''}"><div class="prog-bar"><i style="width:${pct}%"></i></div><span>${total ? `${done} sur ${total} faite${done > 1 ? 's' : ''}` : 'Feuille vide'}</span></div>
       <div class="sub"><span class="load">${load}</span>${off}
-        <span class="legend"><span><i class="dot c-robiii"></i>Robiii</span><span><i class="dot c-immo"></i>ImmoMulti</span><span><i class="dot c-perso"></i>Perso</span></span>
+        ${filters}
       </div>
+      ${views}
     </header>
     <div id="banners">${bannersHtml()}</div>
-    <main class="grid">
+    <main class="grid v-${S.view}">
       ${scheduleHtml()}
-      <div class="boxes">${boxHtml('priorite', by('priorite'))}${boxHtml('rappel', by('rappel'))}${boxHtml('faire', by('faire'))}${lifeHtml(d.tasks.filter(isLife))}${avoidHtml(tasks)}</div>
+      <div class="boxes">${boxHtml('priorite', by('priorite'))}${boxHtml('rappel', by('rappel'))}${boxHtml('faire', by('faire'))}${lifeHtml(d.tasks.filter((t) => isLife(t) && shown(t)))}${avoidHtml(tasks.filter(shown))}</div>
     </main>
     <form class="capture${mic.state === 'idle' ? '' : ' is-rec'}" id="capture">
       <textarea id="capture-text" rows="1" placeholder="${capturePlaceholder()}" aria-label="Ajouter des tâches"></textarea>
@@ -515,6 +550,7 @@ function openEdit(id) {
   const dayVal = t.day === d.today ? 'today' : t.day === addDays(d.today, 1) ? 'tomorrow' : t.day === null ? 'reserve' : 'other';
   const m = openModal(`
     <h2>Modifier</h2>
+    ${t.status === 'todo' && !isLife(t) && t.day === d.today ? `<button class="btn ghost" data-do="focus">${d.focus?.task_id === t.id ? 'Mettre en pause' : 'Je suis là-dessus (démarrer le chrono)'}</button>` : ''}
     <label class="field"><span>${isLife(t) ? 'Moment' : 'Tâche'}</span><input id="e-title" value="${esc(t.title)}"></label>
     <div class="field"><span>Compte dans</span>${chips('kind', [['tache', 'Mon travail'], ['vie', 'Hors travail']], isLife(t) ? 'vie' : 'tache')}</div>
     <div class="field" id="e-section"${isLife(t) ? ' hidden' : ''}><span>Section</span>${chips('section', Object.entries(SECTIONS), t.section)}</div>
@@ -537,7 +573,9 @@ function openEdit(id) {
   m.addEventListener('click', async (e) => {
     const act = e.target.closest('[data-do]')?.dataset.do;
     if (!act) return;
-    if (act === 'delete') {
+    if (act === 'focus') {
+      await guard(() => api('focus', { method: 'POST', body: { task_id: id } }));
+    } else if (act === 'delete') {
       await guard(() => api(`tasks/${id}`, { method: 'DELETE' }));
     } else {
       const dv = chipValue(m, 'day');
@@ -1343,6 +1381,14 @@ async function endDrag(apply) {
   if (kind === 'section' && isLife(t)) body = { kind: 'tache', section: val };
   else if (kind === 'section' && val !== t.section) body = { section: val };
   if (kind === 'life' && !isLife(t)) body = { kind: 'vie' };
+  if (kind === 'before') {
+    const [, beforeId, time] = target.dataset.drop.split(':');
+    if (Number(beforeId) === id) return;
+    // Un moment hors travail garde une heure précise ; une tâche prend sa place dans l'ordre.
+    const res = isLife(t) ? null : await guard(() => api('order', { method: 'POST', body: { id, before: Number(beforeId) } }));
+    if (res?.moved) return load();
+    body = { start_min: Number(time) };
+  }
   if (kind === 'time') body = { start_min: Number(val) };
   if (kind === 'day') body = { day: val === 'reserve' ? null : addDays(S.data.today, 1) };
   if (!body) return;
@@ -1378,6 +1424,29 @@ app.addEventListener('click', async (e) => {
     return load();
   }
   if (act === 'mic') return mic.state === 'rec' ? stopMic() : mic.state === 'idle' ? startMic() : null;
+  if (act === 'up' || act === 'down') {
+    el.disabled = true;
+    await guard(() => api('order', { method: 'POST', body: { id, dir: act } }));
+    return load();
+  }
+  if (act === 'auto-order') {
+    await guard(() => api('plan', { method: 'POST', body: { date: d.date, auto: true } }));
+    toast('Ordre proposé par Pro repris.');
+    return load();
+  }
+  if (act === 'filter') {
+    S.filter = el.dataset.v && el.dataset.v !== S.filter ? el.dataset.v : null;
+    return render();
+  }
+  if (act === 'view') {
+    S.view = el.dataset.v === 'sections' ? 'sections' : 'ordre';
+    try {
+      localStorage.setItem('pro_vue', S.view);
+    } catch {
+      // stockage refusé : le choix vaut pour cette visite
+    }
+    return render();
+  }
   if (act === 'calls') return openCalls();
   if (act === 'mirror') return openMirror();
   if (act === 'prev') return load(addDays(d.date, -1));

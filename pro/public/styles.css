@@ -57,7 +57,7 @@ small { display: block; color: var(--muted); font-size: 0.8rem; font-weight: 400
 @keyframes bump { 40% { transform: scale(1.18); } }
 @keyframes glow { 30% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--good) 30%, transparent); } }
 .sub { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: space-between; font-size: 0.86rem; color: var(--muted); }
-.legend { display: flex; gap: 14px; flex-wrap: wrap; }
+.legend { display: flex; gap: 4px; flex-wrap: wrap; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .warn { color: var(--warn); font-weight: 600; }
 
@@ -89,7 +89,7 @@ small { display: block; color: var(--muted); font-size: 0.8rem; font-weight: 400
 .row:last-of-type { border-bottom: 0; }
 .row .t { flex: 1; min-width: 0; cursor: pointer; }
 .tt { position: relative; display: inline; overflow-wrap: anywhere; background-image: linear-gradient(currentColor, currentColor); background-repeat: no-repeat; background-position: 0 55%; background-size: 0% 2px; transition: background-size 0.45s cubic-bezier(0.3, 0.9, 0.4, 1); }
-.row.done .tt, .row.checking .tt { background-size: 100% 2px; color: var(--muted); }
+.row.done .tt, .checking .tt { background-size: 100% 2px; color: var(--muted); }
 .row.done small { opacity: 0.7; }
 .row .dot { margin-top: 7px; }
 .num { font-family: var(--display); font-weight: 700; color: var(--accent); width: 1em; flex: none; margin-top: 1px; }
@@ -99,11 +99,11 @@ small { display: block; color: var(--muted); font-size: 0.8rem; font-weight: 400
 .cb.on::after { content: ""; position: absolute; left: 6px; top: 2px; width: 5px; height: 10px; border: solid var(--surface); border-width: 0 2.5px 2.5px 0; transform: rotate(45deg); }
 .row.done .cb.on { opacity: 0.75; }
 /* Le moment où tu coches : la case rebondit, un anneau s'ouvre, la ligne s'allume puis se raye. */
-.row.checking { animation: rowflash 0.95s ease; border-radius: 10px; }
-.row.checking .cb { animation: cbpop 0.5s cubic-bezier(0.3, 1.7, 0.5, 1); }
-.row.checking .cb::after { animation: tick 0.32s 0.08s cubic-bezier(0.3, 1.7, 0.5, 1) backwards; }
-.row.checking .cb::before { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid var(--good); animation: ring 0.65s ease-out forwards; pointer-events: none; }
-.row.checking .tt { background-image: linear-gradient(var(--good), var(--good)); background-size: 100% 3px; }
+.row.checking, .blk.checking { animation: rowflash 0.95s ease; border-radius: 10px; }
+.checking .cb { animation: cbpop 0.5s cubic-bezier(0.3, 1.7, 0.5, 1); }
+.checking .cb::after { animation: tick 0.32s 0.08s cubic-bezier(0.3, 1.7, 0.5, 1) backwards; }
+.checking .cb::before { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid var(--good); animation: ring 0.65s ease-out forwards; pointer-events: none; }
+.checking .tt { background-image: linear-gradient(var(--good), var(--good)); background-size: 100% 3px; }
 @keyframes cbpop { 0% { transform: scale(0.8); } 45% { transform: scale(1.4); } 100% { transform: scale(1); } }
 @keyframes tick { from { transform: rotate(45deg) scale(0); opacity: 0; } }
 @keyframes ring { from { transform: scale(0.6); opacity: 0.9; } to { transform: scale(2.8); opacity: 0; } }
@@ -242,7 +242,14 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
 /* iPhone : les priorités d'abord, l'horaire en dernier, tout plus gros */
 @media (max-width: 860px) {
   .grid { grid-template-columns: 1fr; }
-  .horaire { order: 2; }
+  .grid.v-sections .horaire { order: 2; }
+  /* Petit écran : l'heure passe au-dessus du bloc, qui prend toute la largeur. */
+  .hr { grid-template-columns: 1fr; gap: 3px; padding: 6px 0; }
+  .hr time { padding-top: 0; font-weight: 600; }
+  .views { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; background: var(--line); border-radius: 12px; padding: 3px; gap: 3px; }
+  .views button { border: 0; background: none; border-radius: 10px; padding: 9px 6px; font-weight: 600; color: var(--muted); }
+  .views button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 4px rgba(10, 14, 40, 0.12); }
+  .legend { flex-wrap: wrap; }
   .boxes { grid-template-columns: 1fr; }
   .top { grid-template-columns: 1fr; }
   .actions { justify-content: flex-start; }
@@ -274,7 +281,27 @@ html.calm * { animation: none !important; transition: none !important; }
 .row.current .tt { font-weight: 700; }
 .more { border: 0; background: none; color: var(--muted); font-size: 1.2rem; line-height: 1; width: 30px; height: 30px; border-radius: 50%; flex: none; }
 .more:hover { background: var(--soft); color: var(--ink); }
-.blk.task { display: flex; align-items: flex-start; gap: 8px; }
+.blk.task { display: flex; align-items: flex-start; gap: 10px; }
+.blk .cb { background: var(--surface); margin-top: 0; }
+.blk .cb.on { background: var(--good); }
+/* Étiquettes de l'horaire */
+.tag { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 99px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; vertical-align: middle; white-space: nowrap; }
+.tag.now { background: var(--accent); color: var(--surface); }
+.tag.next { background: var(--accent-soft); color: var(--accent); }
+/* Monter et descendre une tâche */
+.mv { display: flex; flex-direction: column; gap: 2px; flex: none; }
+.mv button { width: 34px; height: 26px; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; color: var(--muted); font-size: 0.95rem; line-height: 1; padding: 0; }
+.mv button:hover:not(:disabled) { color: var(--ink); border-color: var(--muted); }
+.mv button:disabled { opacity: 0.3; }
+.hr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.hr.drop-on[data-drop^="before"] { box-shadow: 0 -4px 0 var(--accent); }
+.hr.drop-on[data-drop^="before"] .blk { border-color: transparent; border-left-color: inherit; box-shadow: none; }
+/* Filtre par entreprise et choix de vue */
+.fchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; background: none; border-radius: 99px; padding: 4px 10px; color: var(--muted); font-size: 0.86rem; white-space: nowrap; }
+.fchip b { color: var(--ink); font-weight: 700; }
+.fchip:hover { border-color: var(--line); }
+.fchip.on { background: var(--surface); border-color: var(--ink); color: var(--ink); font-weight: 700; }
+@media (min-width: 861px) { .views { display: none; } }
 .blk.task .bt { flex: 1; min-width: 0; cursor: pointer; }
 .blk.task.current { background: var(--accent-soft); }
 .blk.calls { cursor: pointer; border-left-color: var(--immo); }

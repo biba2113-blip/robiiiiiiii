@@ -76,6 +76,17 @@ npm install && npm run deploy
 Après une mise à jour, Pro se recharge seule à sa prochaine ouverture, même installée sur l'écran d'accueil de l'iPhone.
 La date de la version en ligne est affichée dans ⚙, avec un bouton « Recharger Pro maintenant ».
 
+## Les grosses journées : l'ordre, les flèches, le filtre
+
+- **Dans l'ordre.** Sur iPhone, l'horaire passe en premier : la journée du haut vers le bas, avec une case à cocher sur chaque bloc.
+  Un bouton en haut alterne entre « Dans l'ordre » et « Par section ». Sur Mac, les deux sont côte à côte.
+- **Pourquoi là.** Chaque bloc dit pourquoi il est placé ainsi : échéance proche, obligation, quelqu'un attend, fait avancer.
+  Aujourd'hui, le bloc en cours porte « Maintenant » et le suivant « Ensuite ».
+- **Monter, descendre.** Les flèches ↑ ↓ changent l'ordre d'une tâche ; glisser une tâche sur une autre la range juste avant.
+  Dès que tu touches à l'ordre, c'est le tien pour la journée : une nouvelle tâche arrive à la fin.
+  « Reprendre l'ordre proposé par Pro » l'efface.
+- **Filtre.** Un tap sur Robiii, ImmoMulti ou Perso en haut ne montre que ce groupe ; « Tout voir » revient à la journée entière.
+
 ## Hors travail : blonde, amis, gym
 
 Ces moments ne sont pas du travail et ne comptent pas dans le temps prévu de la journée.
@@ -156,17 +167,18 @@ npm test
 | `public/app.js`, `public/styles.css`, `public/sw.js` | L'écran, et la réception des notifications |
 | `migrations/` | Les tables |
 | `scripts/setup.mjs` | Installation sur Cloudflare |
-| `test/` | Tests de la logique, et quatre parcours à l'écran (`parcours.e2e.cjs`, `micro.e2e.cjs`, `cocher.e2e.cjs`, `hors-travail.e2e.cjs`, demandent Playwright ; `parcours` se joue de jour, il lui faut du temps libre à l'horaire d'aujourd'hui) |
+| `test/` | Tests de la logique, et cinq parcours à l'écran (`parcours.e2e.cjs`, `micro.e2e.cjs`, `cocher.e2e.cjs`, `hors-travail.e2e.cjs`, `ordre.e2e.cjs`, demandent Playwright ; `parcours` se joue de jour, il lui faut du temps libre à l'horaire d'aujourd'hui) |
 
 ## Ce qui a été vérifié, et ce qui ne l'a pas été
 
 Vérifié :
-- 48 tests de logique, dont le chiffrement des notifications contre le vecteur officiel de la RFC 8291.
+- 55 tests de logique, dont le chiffrement des notifications contre le vecteur officiel de la RFC 8291.
 - Le parcours complet à l'écran, sur Mac et iPhone simulés : dictée, confirmation, cocher, glisser, chrono, imprévu, mode appels, bilan, tri du soir, réserve, ce qui revient.
 - La chaîne des notifications en local, de l'horloge jusqu'au message déchiffré par un faux appareil, sans doublon.
 - Le calendrier contre un serveur CalDAV d'essai (Radicale).
 - Le moment où on coche, sur iPhone simulé : case, trait, confettis, notes jouées, barre du jour, message, et la pluie quand la feuille est finie. Le son lui-même n'a pas été écouté.
 - Les moments hors travail, sur Mac et iPhone simulés : dictée, blocs à l'horaire, travail rangé autour, coche, fiche, aller-retour travail / hors travail.
+- L'ordre de la journée, sur Mac et iPhone simulés : raisons affichées, flèches, glisser devant une autre, reprise de l'ordre de Pro, coche depuis l'horaire, filtre par entreprise, choix de vue gardé sur l'appareil.
 - La mise à jour automatique (simulée en changeant la version renvoyée par le serveur) et le réglage « Confettis et animations » sur un appareil qui réduit les animations.
 - Le bouton micro à l'écran, sur Mac et iPhone simulés, avec un faux micro : enregistrement, envoi de l'audio, confirmation, micro refusé, panne de transcription.
 

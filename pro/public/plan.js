@@ -51,6 +51,80 @@ export function lifeBlocks(tasks) {
   return tasks.filter((t) => isLife(t) && t.start_min != null).map((t) => ({ start_min: t.start_min, end_min: t.start_min + t.est_minutes, allDay: false }));
 }
 
+const isFixed = (t) => Boolean(t.pinned && t.start_min != null);
+
+/**
+ * L'ordre dans lequel les tâches sans heure fixe sont placées.
+ * - Dès qu'une tâche a été déplacée à la main, l'ordre de la journée est le tien :
+ *   les tâches rangées à la main d'abord, dans ton ordre, puis les nouvelles selon l'ordre de Pro.
+ * - Sinon : la plus reportée d'abord, puis l'ordre de Pro.
+ */
+export function flexOrder(tasks, today) {
+  const flex = tasks.filter((t) => t.status === 'todo' && !isLife(t) && !isFixed(t));
+  const byHand = flex.filter((t) => t.manual != null).sort((a, b) => a.manual - b.manual || a.id - b.id);
+  const auto = flex.filter((t) => t.manual == null);
+  if (byHand.length) return [...byHand, ...sortTasks(auto, today)];
+  const first = mostAvoided(auto);
+  const ordered = sortTasks(auto.filter((t) => t !== first), today);
+  if (first) ordered.unshift(first);
+  return ordered;
+}
+
+/** Les tâches qu'on peut monter ou descendre, dans l'ordre où elles apparaissent à l'horaire. */
+export function shownOrder(tasks, today) {
+  const rankOf = new Map(flexOrder(tasks, today).map((t, i) => [t.id, i]));
+  return tasks
+    .filter((t) => rankOf.has(t.id))
+    .sort((a, b) => (a.start_min ?? 1e6) - (b.start_min ?? 1e6) || rankOf.get(a.id) - rankOf.get(b.id));
+}
+
+/**
+ * Déplace une tâche dans l'ordre de la journée. Rend la nouvelle suite d'identifiants, ou null si rien ne bouge.
+ * `to` : { dir: 'up' | 'down' | 'first' } ou { before: id } (null = à la fin).
+ */
+export function moveInOrder(tasks, id, to, today) {
+  const moving = tasks.find((t) => t.id === id);
+  if (!moving || moving.status !== 'todo' || isLife(moving)) return null;
+  // Une tâche à heure fixe qu'on déplace redevient libre : elle prend sa place dans la suite.
+  const pool = tasks.map((t) => (t.id === id ? { ...t, pinned: 0 } : t));
+  const seq = shownOrder(pool, today).map((t) => t.id);
+  const from = seq.indexOf(id);
+  if (from < 0) return null;
+  let at;
+  if (to.dir === 'up') at = from - 1;
+  else if (to.dir === 'down') at = from + 1;
+  else if (to.dir === 'first') at = 0;
+  else if (to.before == null) at = seq.length - 1;
+  else {
+    const target = seq.indexOf(to.before);
+    if (target < 0) return null;
+    at = target > from ? target - 1 : target;
+  }
+  if (at < 0 || at >= seq.length || (at === from && !isFixed(moving))) return null;
+  seq.splice(from, 1);
+  seq.splice(at, 0, id);
+  return seq;
+}
+
+/** Pourquoi une tâche est là où elle est : le mot qu'on affiche à côté. */
+export function reasonOf(t, today) {
+  if (isLife(t)) return '';
+  if (isFixed(t)) return 'Heure fixée';
+  if (t.manual != null) return 'Placée par toi';
+  if (t.pushed_count >= 2) return 'Tu la repousses';
+  return ['Échéance proche', 'Obligation', 'Quelqu’un attend', 'Fait avancer', ''][rank(t, today)];
+}
+
+/**
+ * Parmi des blocs triés par heure ({ start, end }), lequel est « maintenant » et lequel vient « ensuite ».
+ * Rend { now: index | -1, next: index | -1 }.
+ */
+export function nowNext(blocks, nowMin) {
+  const now = blocks.findIndex((b) => b.start <= nowMin && nowMin < b.end);
+  const next = blocks.findIndex((b, i) => i !== now && b.start > nowMin);
+  return { now, next };
+}
+
 /** Retire un intervalle occupé d'une liste d'intervalles libres. */
 function subtract(free, s, e) {
   const out = [];
@@ -128,10 +202,7 @@ export function place(tasks, day, events = [], settings = DEFAULTS, opts = {}) {
     }
   }
 
-  const flex = todo.filter((t) => !(t.pinned && t.start_min != null));
-  const first = mostAvoided(flex);
-  const ordered = sortTasks(flex.filter((t) => t !== first), today);
-  if (first) ordered.unshift(first);
+  const ordered = flexOrder(tasks, today);
 
   const unplaced = [];
   let budget = capacity - pinned.reduce((n, t) => n + t.est_minutes, 0);

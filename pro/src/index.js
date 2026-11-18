@@ -1,5 +1,5 @@
 // Pro : le serveur. Tout vit sous le lien privé /k/<clé>/ ; sans la clé, 404.
-import { place, DEFAULTS } from '../public/plan.js';
+import { place, DEFAULTS, moveInOrder } from '../public/plan.js';
 import { toLocal, addDays, dow, nowIso } from './time.js';
 import { parseDump, firstStep, sanitize, checkClaude, MAX_MINUTES } from './parse.js';
 import { configured, eventsFor, syncTasks, listCalendars } from './caldav.js';
@@ -211,6 +211,8 @@ async function patchTask(env, ctx, id, body) {
     set.pinned = 0;
   }
 
+  if ('day' in set && set.day !== old.day) set.manual = null; // l'ordre choisi à la main vaut pour une journée
+
   const keys = Object.keys(set);
   if (keys.length) {
     await run(env, `UPDATE tasks SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => set[k]), id);
@@ -224,6 +226,22 @@ async function patchTask(env, ctx, id, body) {
   return first(env, 'SELECT * FROM tasks WHERE id = ?', id);
 }
 
+/** Monter, descendre ou glisser une tâche : l'ordre de sa journée devient le tien. */
+async function reorder(env, ctx, { id, dir, before }) {
+  const t = await first(env, "SELECT * FROM tasks WHERE id = ? AND status = 'todo'", Number(id));
+  if (!t || !t.day) return false;
+  const tasks = await tasksOf(env, t.day);
+  const to = ['up', 'down', 'first'].includes(dir) ? { dir } : { before: before == null ? null : Number(before) };
+  const seq = moveInOrder(tasks, t.id, to, toLocal().date);
+  if (!seq) return false;
+  await env.DB.batch([
+    ...seq.map((taskId, i) => env.DB.prepare('UPDATE tasks SET manual = ? WHERE id = ?').bind(i, taskId)),
+    env.DB.prepare('UPDATE tasks SET pinned = 0 WHERE id = ?').bind(t.id),
+  ]);
+  await replan(env, ctx, t.day);
+  return true;
+}
+
 /** Le tri : chaque tâche non faite reçoit une décision. */
 async function triage(env, ctx, { decisions = [], to }) {
   const today = toLocal().date;
@@ -233,9 +251,9 @@ async function triage(env, ctx, { decisions = [], to }) {
     const t = await first(env, "SELECT * FROM tasks WHERE id = ? AND status = 'todo'", Number(d.id));
     if (!t) continue;
     if (d.action === 'report') {
-      await run(env, 'UPDATE tasks SET day = ?, start_min = NULL, pinned = 0, pushed_count = pushed_count + 1 WHERE id = ?', target, t.id);
+      await run(env, 'UPDATE tasks SET day = ?, start_min = NULL, pinned = 0, manual = NULL, pushed_count = pushed_count + 1 WHERE id = ?', target, t.id);
     } else if (d.action === 'reserve') {
-      await run(env, 'UPDATE tasks SET day = NULL, start_min = NULL, pinned = 0 WHERE id = ?', t.id);
+      await run(env, 'UPDATE tasks SET day = NULL, start_min = NULL, pinned = 0, manual = NULL WHERE id = ?', t.id);
     } else if (d.action === 'delete') {
       await run(env, "UPDATE tasks SET status = 'deleted' WHERE id = ?", t.id);
     } else continue;
@@ -332,10 +350,14 @@ async function api(req, env, ctx, path, url) {
 
   if (path === 'plan' && m === 'POST') {
     const date = isDate(body.date) ? body.date : today;
-    if (body.unpin) await run(env, "UPDATE tasks SET pinned = 0 WHERE day = ? AND status = 'todo'", date);
+    if (body.unpin) await run(env, "UPDATE tasks SET pinned = 0 WHERE day = ? AND status = 'todo' AND kind != 'vie'", date);
+    // Reprendre l'ordre proposé par Pro : on oublie l'ordre choisi à la main ce jour-là.
+    if (body.auto) await run(env, 'UPDATE tasks SET manual = NULL WHERE day = ?', date);
     await replan(env, ctx, date);
     return json(await sheet(env, date));
   }
+
+  if (path === 'order' && m === 'POST') return json({ moved: await reorder(env, ctx, body) });
 
   if ((r = path.match(/^days\/(\d{4}-\d{2}-\d{2})$/)) && m === 'PUT') {
     const clampMin = (v, d) => Math.min(1440, Math.max(0, Math.round(Number(v ?? d) / 5) * 5));
